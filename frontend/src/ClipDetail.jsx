@@ -1,23 +1,38 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { api, fileUrl } from "./api.js";
 
-// Detail / editor panel for a single clip: play it, tag it, and run the
-// edit + manipulate operations (trim, speed) which spawn new derived clips.
-export default function ClipDetail({ clip, onClose, onChanged }) {
+// Detail / editor panel for one clip:
+//  - annotate: title + description (metadata) and free-text tags
+//  - time-crop: mark labeled segments (the reusable units for combining)
+//  - quick edits: trim and speed, each spawning a new derived clip
+export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }) {
+  const videoRef = useRef(null);
+
+  const [title, setTitle] = useState(clip.title || "");
+  const [description, setDescription] = useState(clip.description || "");
   const [tags, setTags] = useState(clip.tags);
+  const [segments, setSegments] = useState(clip.segments || []);
   const [newTag, setNewTag] = useState("");
-  const [start, setStart] = useState(0);
-  const [end, setEnd] = useState(clip.duration || 0);
+
+  const [segStart, setSegStart] = useState(0);
+  const [segEnd, setSegEnd] = useState(clip.duration || 0);
+  const [segLabel, setSegLabel] = useState("");
+
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(clip.duration || 0);
   const [factor, setFactor] = useState(1.5);
+
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
+
+  const playhead = () =>
+    videoRef.current ? Number(videoRef.current.currentTime.toFixed(2)) : 0;
 
   const guard = (fn) => async () => {
     setBusy(true);
     setNote(null);
     try {
       await fn();
-      await onChanged();
     } catch (e) {
       setNote(e.message);
     } finally {
@@ -25,27 +40,64 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
     }
   };
 
+  const saveMeta = guard(async () => {
+    await api.updateMeta(clip.id, { title, description });
+    setNote("Saved");
+    await onChanged();
+  });
+
   const addTag = guard(async () => {
     if (!newTag.trim()) return;
     const updated = await api.addTag(clip.id, newTag.trim());
     setTags(updated.tags);
     setNewTag("");
+    await onChanged();
   });
 
   const removeTag = (t) =>
     guard(async () => {
       const updated = await api.removeTag(clip.id, t);
       setTags(updated.tags);
+      await onChanged();
     })();
 
+  const addSegment = guard(async () => {
+    const updated = await api.addSegment(clip.id, {
+      start: Number(segStart),
+      end: Number(segEnd),
+      label: segLabel.trim() || null,
+    });
+    setSegments(updated.segments);
+    setSegLabel("");
+    await onChanged();
+  });
+
+  const removeSegment = (segId) =>
+    guard(async () => {
+      await api.deleteSegment(segId);
+      setSegments(segments.filter((s) => s.id !== segId));
+      await onChanged();
+    })();
+
+  const sendSegment = (s) =>
+    onAddToTimeline({
+      kind: "segment",
+      clip_id: clip.id,
+      start: s.start,
+      end: s.end,
+      label: s.label || title || clip.filename,
+    });
+
   const doTrim = guard(async () => {
-    await api.trim(clip.id, Number(start), Number(end));
+    await api.trim(clip.id, Number(trimStart), Number(trimEnd));
     setNote("Trimmed → new clip created");
+    await onChanged();
   });
 
   const doSpeed = guard(async () => {
     await api.speed(clip.id, Number(factor));
     setNote(`Speed ×${factor} → new clip created`);
+    await onChanged();
   });
 
   return (
@@ -54,18 +106,31 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
         <button className="close" onClick={onClose}>
           ×
         </button>
-        <video src={fileUrl(clip.id)} controls autoPlay />
-
-        <div className="info">
-          <div className="title">
-            {clip.ig_owner ? `@${clip.ig_owner}` : clip.filename}
-          </div>
-          {clip.caption && <p className="caption">{clip.caption}</p>}
-          <div className="dims">
-            {clip.width}×{clip.height} · {clip.duration?.toFixed(1)}s ·{" "}
-            {clip.fps?.toFixed(0)}fps · {clip.source}
-          </div>
+        <video ref={videoRef} src={fileUrl(clip.id)} controls autoPlay />
+        <div className="dims">
+          {clip.width}×{clip.height} · {clip.duration?.toFixed(1)}s ·{" "}
+          {clip.fps?.toFixed(0)}fps · {clip.source}
         </div>
+
+        <section>
+          <h3>Annotate</h3>
+          <input
+            className="full"
+            placeholder="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            className="full"
+            placeholder="description / notes"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <button onClick={saveMeta} disabled={busy}>
+            save
+          </button>
+        </section>
 
         <section>
           <h3>Tags</h3>
@@ -91,7 +156,23 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
         </section>
 
         <section>
-          <h3>Trim</h3>
+          <h3>Segments (time-crop)</h3>
+          {segments.length > 0 && (
+            <ul className="seglist">
+              {segments.map((s) => (
+                <li key={s.id}>
+                  <span className="seglabel">{s.label || "segment"}</span>
+                  <span className="segtime">
+                    {s.start.toFixed(1)}–{s.end.toFixed(1)}s
+                  </span>
+                  <button onClick={() => sendSegment(s)} title="add to timeline">
+                    → timeline
+                  </button>
+                  <button onClick={() => removeSegment(s.id)}>×</button>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="row">
             <label>
               start
@@ -99,8 +180,49 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
                 type="number"
                 step="0.1"
                 min="0"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
+                value={segStart}
+                onChange={(e) => setSegStart(e.target.value)}
+              />
+            </label>
+            <button onClick={() => setSegStart(playhead())} title="use playhead">
+              ⌖
+            </button>
+            <label>
+              end
+              <input
+                type="number"
+                step="0.1"
+                value={segEnd}
+                onChange={(e) => setSegEnd(e.target.value)}
+              />
+            </label>
+            <button onClick={() => setSegEnd(playhead())} title="use playhead">
+              ⌖
+            </button>
+          </div>
+          <div className="row">
+            <input
+              placeholder="label (optional)"
+              value={segLabel}
+              onChange={(e) => setSegLabel(e.target.value)}
+            />
+            <button onClick={addSegment} disabled={busy}>
+              mark segment
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Trim → new clip</h3>
+          <div className="row">
+            <label>
+              start
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={trimStart}
+                onChange={(e) => setTrimStart(e.target.value)}
               />
             </label>
             <label>
@@ -108,8 +230,8 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
               <input
                 type="number"
                 step="0.1"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
+                value={trimEnd}
+                onChange={(e) => setTrimEnd(e.target.value)}
               />
             </label>
             <button onClick={doTrim} disabled={busy}>
@@ -119,7 +241,7 @@ export default function ClipDetail({ clip, onClose, onChanged }) {
         </section>
 
         <section>
-          <h3>Speed</h3>
+          <h3>Speed → new clip</h3>
           <div className="row">
             <input
               type="range"

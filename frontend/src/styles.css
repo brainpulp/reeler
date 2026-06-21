@@ -16,7 +16,7 @@ body {
   font: 14px/1.4 system-ui, -apple-system, sans-serif;
 }
 
-.app { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.app { max-width: 1100px; margin: 0 auto; padding: 16px; padding-bottom: 220px; }
 
 header {
   display: flex;
@@ -127,3 +127,48 @@ input {
 .tags .tag { display: inline-flex; align-items: center; gap: 4px; }
 .tags .tag button { padding: 0 4px; border: none; background: none; }
 .note { margin-top: 12px; color: #8f8; font-size: 13px; }
+.full { width: 100%; margin-bottom: 6px; }
+textarea.full { resize: vertical; font: inherit; }
+button.primary { background: var(--accent); border-color: var(--accent); }
+
+/* Segments list inside detail */
+.seglist { list-style: none; padding: 0; margin: 0 0 8px; }
+.seglist li { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+.seglabel { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segtime { color: var(--muted); font-size: 12px; }
+.seglist button { padding: 2px 6px; font-size: 12px; }
+
+/* Bottom timeline tray */
+.timeline {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  background: #14141b;
+  border-top: 1px solid var(--line);
+  padding: 10px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 5;
+}
+.tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-title { flex: 1; min-width: 160px; }
+.tl-empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+.tl-items { list-style: none; display: flex; gap: 8px; padding: 8px 0 0; margin: 0; overflow-x: auto; }
+.tl-item {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  flex: 0 0 auto;
+}
+.tl-item.card { border-style: dashed; }
+.tl-order { display: flex; flex-direction: column; }
+.tl-order button { padding: 0 5px; line-height: 1.1; font-size: 11px; }
+.tl-body { display: flex; align-items: center; gap: 6px; }
+.tl-kind { font-size: 11px; color: var(--muted); }
+.tl-label { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-time { font-size: 11px; color: var(--muted); }
+.card-edit input { width: 110px; }
+.card-edit input[type="number"] { width: 56px; }
+.card-edit input.bg { width: 70px; }
+.tl-x { padding: 2px 7px; }

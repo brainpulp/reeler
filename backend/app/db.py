@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS clips (
     ig_shortcode TEXT,                     -- Instagram shortcode, when source='instagram'
     ig_owner     TEXT,                     -- original poster's handle
     caption      TEXT,
+    title        TEXT,                     -- user annotation: short title
+    description  TEXT,                     -- user annotation: longer notes
     filename     TEXT NOT NULL,            -- basename on disk
     rel_path     TEXT NOT NULL,            -- path relative to DATA_DIR
     width        INTEGER,
@@ -29,6 +31,18 @@ CREATE TABLE IF NOT EXISTS clips (
     op           TEXT,                     -- how a derived clip was produced (json)
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Labeled time-ranges marked within a clip; the reusable units for combining.
+CREATE TABLE IF NOT EXISTS segments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    clip_id    INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    label      TEXT,
+    start      REAL NOT NULL,
+    "end"      REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_segments_clip ON segments(clip_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_shortcode
     ON clips(ig_shortcode) WHERE ig_shortcode IS NOT NULL;
@@ -64,6 +78,15 @@ def get_conn() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the first schema, for pre-existing dbs."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(clips)")}
+    for name in ("title", "description"):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE clips ADD COLUMN {name} TEXT")
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)

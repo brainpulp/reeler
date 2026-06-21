@@ -106,6 +106,7 @@ def _clip_to_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     d = dict(row)
     d["tags"] = [t["name"] for t in tags]
     d["op"] = json.loads(row["op"]) if row["op"] else None
+    d["segments"] = list_segments(conn, row["id"])
     return d
 
 
@@ -135,3 +136,48 @@ def remove_tag(conn: sqlite3.Connection, clip_id: int, name: str) -> None:
 def all_tags(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute("SELECT name FROM tags ORDER BY name").fetchall()
     return [r["name"] for r in rows]
+
+
+# --------------------------------------------------------------- metadata ----
+def update_metadata(
+    conn: sqlite3.Connection,
+    clip_id: int,
+    title: str | None,
+    description: str | None,
+) -> None:
+    conn.execute(
+        "UPDATE clips SET title = ?, description = ? WHERE id = ?",
+        (title, description, clip_id),
+    )
+
+
+# --------------------------------------------------------------- segments ----
+def add_segment(
+    conn: sqlite3.Connection,
+    clip_id: int,
+    start: float,
+    end: float,
+    label: str | None = None,
+) -> int:
+    cur = conn.execute(
+        'INSERT INTO segments (clip_id, label, start, "end") VALUES (?, ?, ?, ?)',
+        (clip_id, (label or "").strip() or None, start, end),
+    )
+    return cur.lastrowid
+
+
+def list_segments(conn: sqlite3.Connection, clip_id: int) -> list[dict]:
+    rows = conn.execute(
+        'SELECT * FROM segments WHERE clip_id = ? ORDER BY start', (clip_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_segment(conn: sqlite3.Connection, segment_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM segments WHERE id = ?", (segment_id,)
+    ).fetchone()
+
+
+def delete_segment(conn: sqlite3.Connection, segment_id: int) -> None:
+    conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))

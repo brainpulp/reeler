@@ -15,10 +15,16 @@ handling, no anti-detection.
 |-------|--------------|
 | **Sniff** | Pull saved reels into a local library via your browser session |
 | **Visualize** | Browse a grid of thumbnails, click to play |
-| **Tag** | Free-text tags per clip; filter the library by tag |
+| **Annotate** | Per-clip title + description, plus free-text tags; filter by tag |
+| **Time-crop** | Mark labeled time-segments inside a clip (the reusable combine units) |
+| **Combine** | Assemble an ordered **timeline** of segments + text cards → new clip |
 | **Edit** | Trim a clip to in/out points → new derived clip |
-| **Combine** | Concatenate two or more clips → new clip |
 | **Manipulate** | Change playback speed (the pattern for further transforms) |
+
+**Text cards** ("inner screens") are full-canvas screens of centered text you
+can drop between segments on the timeline. Everything is conformed to a shared
+1080×1920 canvas (letterboxed, never distorted) so clips of any aspect ratio
+combine cleanly.
 
 Edits never overwrite originals — each operation produces a new *derived* clip,
 so the library is non-destructive.
@@ -67,10 +73,18 @@ The cookie file and the `data/` directory are gitignored.
 | `GET`  | `/api/clips?tag=` | List clips (optionally filtered by tag) |
 | `GET`  | `/api/clips/{id}/file` | Stream the video |
 | `GET`  | `/api/clips/{id}/thumb` | Poster thumbnail |
+| `PATCH`| `/api/clips/{id}` | Update `{title, description}` annotation |
 | `POST` / `DELETE` | `/api/clips/{id}/tags[/{name}]` | Add / remove a tag |
+| `POST` | `/api/clips/{id}/segments` | Mark `{start, end, label}` time-segment |
+| `DELETE` | `/api/segments/{id}` | Delete a segment |
+| `POST` | `/api/timeline` | Render ordered `{items: [...]}` of segments + cards |
 | `POST` | `/api/clips/{id}/trim` | Trim `{start, end}` → derived clip |
 | `POST` | `/api/clips/{id}/speed` | Speed `{factor}` → derived clip |
-| `POST` | `/api/combine` | Concat `{clip_ids: [...]}` → derived clip |
+| `POST` | `/api/combine` | Concat `{clip_ids: [...]}` whole clips → derived clip |
+
+A timeline item is either
+`{"kind":"segment","clip_id":N,"start":S,"end":E}` or
+`{"kind":"card","text":"...","duration":D,"bg":"black"}`.
 
 ## Project layout
 

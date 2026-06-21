@@ -41,6 +41,14 @@ export const api = {
     }),
   combine: (clipIds) =>
     req("/combine", { method: "POST", body: JSON.stringify({ clip_ids: clipIds }) }),
+  updateMeta: (id, meta) =>
+    req(`/clips/${id}`, { method: "PATCH", body: JSON.stringify(meta) }),
+  addSegment: (id, seg) =>
+    req(`/clips/${id}/segments`, { method: "POST", body: JSON.stringify(seg) }),
+  deleteSegment: (segId) =>
+    req(`/segments/${segId}`, { method: "DELETE" }),
+  renderTimeline: (items, title) =>
+    req("/timeline", { method: "POST", body: JSON.stringify({ items, title }) }),
 };
 
 export const fileUrl = (id) => `/api/clips/${id}/file`;

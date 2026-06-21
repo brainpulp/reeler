@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { api, fileUrl, thumbUrl } from "./api.js";
 import ClipDetail from "./ClipDetail.jsx";
+import Timeline from "./Timeline.jsx";
 
 export default function App() {
   const [clips, setClips] = useState([]);
@@ -8,8 +9,11 @@ export default function App() {
   const [activeTag, setActiveTag] = useState(null);
   const [selected, setSelected] = useState([]); // ids picked for combine
   const [open, setOpen] = useState(null); // clip in detail view
+  const [timeline, setTimeline] = useState([]); // ordered combine items
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
   const refresh = useCallback(async () => {
     const data = await api.listClips(activeTag);
@@ -44,11 +48,22 @@ export default function App() {
   const toggleSelect = (id) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const onCombine = () =>
-    run(async () => {
-      await api.combine(selected);
-      setSelected([]);
+  // Drop the selected clips into the timeline as full-length segments.
+  const onAddSelected = () => {
+    const byId = Object.fromEntries(clips.map((c) => [c.id, c]));
+    selected.forEach((id) => {
+      const c = byId[id];
+      if (!c) return;
+      addToTimeline({
+        kind: "segment",
+        clip_id: id,
+        start: 0,
+        end: c.duration || 0,
+        label: c.title || (c.ig_owner ? `@${c.ig_owner}` : c.filename),
+      });
     });
+    setSelected([]);
+  };
 
   return (
     <div className="app">
@@ -63,11 +78,11 @@ export default function App() {
             <input type="file" accept="video/*" hidden onChange={onUpload} />
           </label>
           <button
-            onClick={onCombine}
-            disabled={busy || selected.length < 2}
-            title="Select 2+ clips to combine"
+            onClick={onAddSelected}
+            disabled={busy || selected.length === 0}
+            title="Add selected clips to the timeline as full segments"
           >
-            Combine ({selected.length})
+            Add selected → timeline ({selected.length})
           </button>
         </div>
       </header>
@@ -150,11 +165,14 @@ export default function App() {
         <ClipDetail
           clip={open}
           onClose={() => setOpen(null)}
+          onAddToTimeline={addToTimeline}
           onChanged={async () => {
             await refresh();
           }}
         />
       )}
+
+      <Timeline items={timeline} setItems={setTimeline} onRendered={refresh} />
     </div>
   );
 }

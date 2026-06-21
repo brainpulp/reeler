@@ -61,6 +61,34 @@ class CombineRequest(BaseModel):
     clip_ids: list[int]
 
 
+class MetadataRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+
+
+class SegmentRequest(BaseModel):
+    start: float
+    end: float
+    label: str | None = None
+
+
+class TimelineItem(BaseModel):
+    kind: str                       # 'segment' | 'card'
+    # segment
+    clip_id: int | None = None
+    start: float | None = None
+    end: float | None = None
+    # card
+    text: str | None = None
+    duration: float | None = 2.5
+    bg: str | None = "black"
+
+
+class TimelineRequest(BaseModel):
+    items: list[TimelineItem]
+    title: str | None = None
+
+
 # ---------------------------------------------------------------- health -----
 @app.get("/api/health")
 def health() -> dict:
@@ -163,6 +191,71 @@ def remove_tag(clip_id: int, name: str) -> dict:
             raise HTTPException(404, "clip not found")
         repo.remove_tag(conn, clip_id, name)
         return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+# ----------------------------------------------- annotate (metadata) ---------
+@app.patch("/api/clips/{clip_id}")
+def update_metadata(clip_id: int, req: MetadataRequest) -> dict:
+    with db.get_conn() as conn:
+        if not repo.get_clip(conn, clip_id):
+            raise HTTPException(404, "clip not found")
+        repo.update_metadata(conn, clip_id, req.title, req.description)
+        return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+# ----------------------------------------------- segments (time-crop) --------
+@app.post("/api/clips/{clip_id}/segments")
+def add_segment(clip_id: int, req: SegmentRequest) -> dict:
+    if req.end <= req.start:
+        raise HTTPException(400, "end must be greater than start")
+    with db.get_conn() as conn:
+        if not repo.get_clip(conn, clip_id):
+            raise HTTPException(404, "clip not found")
+        repo.add_segment(conn, clip_id, req.start, req.end, req.label)
+        return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+@app.delete("/api/segments/{segment_id}")
+def delete_segment(segment_id: int) -> dict:
+    with db.get_conn() as conn:
+        repo.delete_segment(conn, segment_id)
+        return {"ok": True}
+
+
+# ----------------------------------------------- timeline (combine) ----------
+@app.post("/api/timeline")
+def render_timeline(req: TimelineRequest) -> dict:
+    if not req.items:
+        raise HTTPException(400, "timeline has no items")
+    with db.get_conn() as conn:
+        resolved: list[dict] = []
+        for it in req.items:
+            if it.kind == "segment":
+                if it.clip_id is None or it.start is None or it.end is None:
+                    raise HTTPException(400, "segment item needs clip_id/start/end")
+                row = repo.get_clip(conn, it.clip_id)
+                if not row:
+                    raise HTTPException(404, f"clip {it.clip_id} not found")
+                resolved.append({
+                    "kind": "segment", "path": repo.clip_path(row),
+                    "start": it.start, "end": it.end,
+                })
+            elif it.kind == "card":
+                resolved.append({
+                    "kind": "card", "text": it.text or "",
+                    "duration": it.duration or 2.5, "bg": it.bg or "black",
+                })
+            else:
+                raise HTTPException(400, f"unknown item kind: {it.kind}")
+        try:
+            out = media.render_timeline(resolved)
+        except media.MediaError as exc:
+            raise HTTPException(400, str(exc))
+        op = {"type": "timeline", "items": [i.model_dump() for i in req.items]}
+        new_id = repo.register_clip(conn, path=out, source="derived", op=op)
+        if req.title:
+            repo.update_metadata(conn, new_id, req.title, None)
+        return repo._clip_to_dict(conn, repo.get_clip(conn, new_id))
 
 
 # ----------------------------------------------- edit / manipulate -----------

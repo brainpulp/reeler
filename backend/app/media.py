@@ -8,11 +8,34 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
+import textwrap
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
+
+# Output canvas everything is normalized to (portrait 9:16, the reel default).
+CANVAS_W = 1080
+CANVAS_H = 1920
+CANVAS_FPS = 30
+AUDIO_RATE = 44100
+
+# Font used for text cards. Picked from a few common locations so this works
+# across distros without extra config.
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
+
+
+def _font() -> str:
+    for path in _FONT_CANDIDATES:
+        if Path(path).exists():
+            return path
+    raise MediaError("no usable TTF font found for text cards")
 
 
 class MediaError(RuntimeError):
@@ -131,9 +154,18 @@ def _atempo_chain(factor: float) -> str:
     return ",".join(parts)
 
 
+# Video normalization: fit any clip inside the canvas without distortion
+# (letterbox-pad), so segments and cards of any aspect ratio concatenate cleanly.
+_NORM_VF = (
+    f"scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=decrease,"
+    f"pad={CANVAS_W}:{CANVAS_H}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+    f"fps={CANVAS_FPS},format=yuv420p"
+)
+
+
 def concat(sources: list[Path]) -> Path:
-    """Join clips end to end. Normalizes each to a common format first so clips
-    with different resolutions/codecs concatenate cleanly."""
+    """Join clips end to end, normalizing each to the shared canvas first so
+    clips with different resolutions/codecs concatenate cleanly."""
     if len(sources) < 2:
         raise MediaError("concat needs at least two clips")
     out = _derived_path()
@@ -141,10 +173,8 @@ def concat(sources: list[Path]) -> Path:
     filters: list[str] = []
     for i, src in enumerate(sources):
         inputs += ["-i", str(src)]
-        # normalize to 1080-wide, 30fps, sar 1, with audio
         filters.append(
-            f"[{i}:v]scale=1080:-2,setsar=1,fps=30[v{i}];"
-            f"[{i}:a]aresample=44100[a{i}]"
+            f"[{i}:v]{_NORM_VF}[v{i}];[{i}:a]aresample={AUDIO_RATE}[a{i}]"
         )
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(sources)))
     filter_complex = (
@@ -159,3 +189,113 @@ def concat(sources: list[Path]) -> Path:
         str(out),
     ])
     return out
+
+
+def _has_audio(path: Path) -> bool:
+    proc = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "csv=p=0", str(path),
+        ],
+        capture_output=True, text=True,
+    )
+    return bool(proc.stdout.strip())
+
+
+def normalize_segment(src: Path, start: float, end: float, out: Path) -> Path:
+    """Cut [start, end] and conform it to the canvas. Synthesizes silent audio
+    for clips that have none so every part has a uniform stream layout."""
+    if end <= start:
+        raise MediaError("segment end must be greater than start")
+    duration = end - start
+    cmd = ["ffmpeg", "-y", "-ss", str(start), "-i", str(src), "-t", str(duration)]
+    if _has_audio(src):
+        amap = "0:a"
+    else:
+        cmd += ["-f", "lavfi", "-i",
+                f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}"]
+        amap = "1:a"
+    cmd += [
+        "-vf", _NORM_VF, "-map", "0:v", "-map", amap, "-shortest",
+        "-c:v", "libx264", "-c:a", "aac", "-ar", str(AUDIO_RATE),
+        "-movflags", "+faststart", str(out),
+    ]
+    _run(cmd)
+    return out
+
+
+def make_text_card(
+    text: str,
+    duration: float = 2.5,
+    out: Path | None = None,
+    bg: str = "black",
+    fg: str = "white",
+    fontsize: int = 72,
+) -> Path:
+    """Render a full-canvas 'inner screen' of centered text with silent audio."""
+    if duration <= 0:
+        raise MediaError("card duration must be positive")
+    out = out or _derived_path()
+    wrapped = textwrap.fill(text.strip() or " ", width=22)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
+        tf.write(wrapped)
+        textfile = tf.name
+    drawtext = (
+        f"drawtext=fontfile={_font()}:textfile={textfile}:"
+        f"fontcolor={fg}:fontsize={fontsize}:line_spacing=16:"
+        "x=(w-text_w)/2:y=(h-text_h)/2"
+    )
+    try:
+        _run([
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i",
+            f"color=c={bg}:s={CANVAS_W}x{CANVAS_H}:r={CANVAS_FPS}:d={duration}",
+            "-f", "lavfi", "-i",
+            f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}",
+            "-vf", drawtext, "-t", str(duration), "-shortest",
+            "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", str(out),
+        ])
+    finally:
+        Path(textfile).unlink(missing_ok=True)
+    return out
+
+
+def render_timeline(items: list[dict]) -> Path:
+    """Assemble an ordered list of timeline items into one clip.
+
+    Each item is one of:
+      {"kind": "segment", "path": Path, "start": float, "end": float}
+      {"kind": "card",    "text": str, "duration": float, "bg"?: str}
+    Items are conformed to the shared canvas, then concatenated.
+    """
+    if not items:
+        raise MediaError("timeline has no items")
+    with tempfile.TemporaryDirectory() as td:
+        parts: list[Path] = []
+        for i, item in enumerate(items):
+            part = Path(td) / f"{i:03d}.mp4"
+            kind = item.get("kind")
+            if kind == "segment":
+                normalize_segment(
+                    Path(item["path"]), float(item["start"]),
+                    float(item["end"]), part,
+                )
+            elif kind == "card":
+                make_text_card(
+                    item["text"], float(item.get("duration", 2.5)),
+                    out=part, bg=item.get("bg", "black"),
+                )
+            else:
+                raise MediaError(f"unknown timeline item kind: {kind!r}")
+            parts.append(part)
+
+        if len(parts) == 1:
+            final = _derived_path()
+            _run([
+                "ffmpeg", "-y", "-i", str(parts[0]),
+                "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart",
+                str(final),
+            ])
+            return final
+        return concat(parts)
