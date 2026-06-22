@@ -1,7 +1,10 @@
 fastapi==0.115.6
-uvicorn[standard]==0.34.0
+# Plain uvicorn (no [standard]) avoids native uvloop/httptools/watchfiles builds,
+# which lack wheels on very new Pythons (e.g. 3.14) and fail to compile.
+uvicorn==0.34.0
 instaloader==4.13.1
 python-multipart==0.0.20
-pydantic==2.10.4
+# Unpinned within 2.x so pip can pick a build with wheels for new Pythons (3.13/3.14).
+pydantic>=2.11,<3
 # Lets pydantic evaluate `X | None` annotations on Python 3.9 (macOS system Python).
 eval_type_backport>=0.2.0,<1
