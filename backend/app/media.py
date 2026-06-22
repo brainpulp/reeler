@@ -261,6 +261,51 @@ def make_text_card(
     return out
 
 
+def overlay_text(
+    src: Path,
+    text: str,
+    position: str = "bottom",
+    fontsize: int = 48,
+    start: float | None = None,
+    end: float | None = None,
+    fg: str = "white",
+) -> Path:
+    """Burn a caption onto a clip, preserving its own dimensions.
+
+    position is 'top' | 'center' | 'bottom'. When start/end are given the
+    caption only shows during that window; otherwise it shows for the whole clip.
+    """
+    out = _derived_path()
+    y = {
+        "top": "80",
+        "center": "(h-text_h)/2",
+        "bottom": "h-text_h-100",
+    }.get(position, "h-text_h-100")
+
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
+        tf.write(textwrap.fill(text.strip() or " ", width=28))
+        textfile = tf.name
+
+    drawtext = (
+        f"drawtext=fontfile={_font()}:textfile={textfile}:"
+        f"fontcolor={fg}:fontsize={fontsize}:line_spacing=8:"
+        "box=1:boxcolor=black@0.5:boxborderw=16:"
+        f"x=(w-text_w)/2:y={y}"
+    )
+    if start is not None and end is not None:
+        # Single-quote the expression so its commas aren't read as filter separators.
+        drawtext += f":enable='between(t,{start},{end})'"
+
+    cmd = ["ffmpeg", "-y", "-i", str(src), "-vf", drawtext, "-c:v", "libx264"]
+    cmd += ["-c:a", "copy"] if _has_audio(src) else ["-an"]
+    cmd += ["-movflags", "+faststart", str(out)]
+    try:
+        _run(cmd)
+    finally:
+        Path(textfile).unlink(missing_ok=True)
+    return out
+
+
 def render_timeline(items: list[dict]) -> Path:
     """Assemble an ordered list of timeline items into one clip.
 

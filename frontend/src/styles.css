@@ -128,6 +128,12 @@ input {
 .tags .tag button { padding: 0 4px; border: none; background: none; }
 .note { margin-top: 12px; color: #8f8; font-size: 13px; }
 .full { width: 100%; margin-bottom: 6px; }
+select {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+}
+label.inline { flex-direction: row; align-items: center; gap: 4px; }
+.row input[type="number"][title] { width: 70px; }
 textarea.full { resize: vertical; font: inherit; }
 button.primary { background: var(--accent); border-color: var(--accent); }
 

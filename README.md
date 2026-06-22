@@ -19,6 +19,7 @@ handling, no anti-detection.
 | **Time-crop** | Mark labeled time-segments inside a clip (the reusable combine units) |
 | **Combine** | Assemble an ordered **timeline** of segments + text cards → new clip |
 | **Edit** | Trim a clip to in/out points → new derived clip |
+| **Caption** | Burn on-screen text onto a clip (optionally for a time window) |
 | **Manipulate** | Change playback speed (the pattern for further transforms) |
 
 **Text cards** ("inner screens") are full-canvas screens of centered text you
@@ -80,6 +81,7 @@ The cookie file and the `data/` directory are gitignored.
 | `POST` | `/api/timeline` | Render ordered `{items: [...]}` of segments + cards |
 | `POST` | `/api/clips/{id}/trim` | Trim `{start, end}` → derived clip |
 | `POST` | `/api/clips/{id}/speed` | Speed `{factor}` → derived clip |
+| `POST` | `/api/clips/{id}/caption` | Burn in `{text, position, start?, end?}` → derived clip |
 | `POST` | `/api/combine` | Concat `{clip_ids: [...]}` whole clips → derived clip |
 
 A timeline item is either

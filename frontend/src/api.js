@@ -49,6 +49,8 @@ export const api = {
     req(`/segments/${segId}`, { method: "DELETE" }),
   renderTimeline: (items, title) =>
     req("/timeline", { method: "POST", body: JSON.stringify({ items, title }) }),
+  caption: (id, cap) =>
+    req(`/clips/${id}/caption`, { method: "POST", body: JSON.stringify(cap) }),
 };
 
 export const fileUrl = (id) => `/api/clips/${id}/file`;

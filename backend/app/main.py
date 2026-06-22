@@ -57,6 +57,14 @@ class SpeedRequest(BaseModel):
     factor: float
 
 
+class CaptionRequest(BaseModel):
+    text: str
+    position: str = "bottom"          # 'top' | 'center' | 'bottom'
+    fontsize: int = 48
+    start: float | None = None        # optional show window
+    end: float | None = None
+
+
 class CombineRequest(BaseModel):
     clip_ids: list[int]
 
@@ -290,6 +298,20 @@ def speed(clip_id: int, req: SpeedRequest) -> dict:
         clip_id, "speed",
         lambda p: media.set_speed(p, req.factor),
         {"factor": req.factor},
+    )
+
+
+@app.post("/api/clips/{clip_id}/caption")
+def caption(clip_id: int, req: CaptionRequest) -> dict:
+    if not req.text.strip():
+        raise HTTPException(400, "caption text is empty")
+    return _derive(
+        clip_id, "caption",
+        lambda p: media.overlay_text(
+            p, req.text, req.position, req.fontsize, req.start, req.end,
+        ),
+        {"text": req.text, "position": req.position, "fontsize": req.fontsize,
+         "start": req.start, "end": req.end},
     )
 
 

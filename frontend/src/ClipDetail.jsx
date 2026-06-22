@@ -22,6 +22,12 @@ export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }
   const [trimEnd, setTrimEnd] = useState(clip.duration || 0);
   const [factor, setFactor] = useState(1.5);
 
+  const [capText, setCapText] = useState("");
+  const [capPos, setCapPos] = useState("bottom");
+  const [capTimed, setCapTimed] = useState(false);
+  const [capStart, setCapStart] = useState(0);
+  const [capEnd, setCapEnd] = useState(clip.duration || 0);
+
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
 
@@ -97,6 +103,18 @@ export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }
   const doSpeed = guard(async () => {
     await api.speed(clip.id, Number(factor));
     setNote(`Speed ×${factor} → new clip created`);
+    await onChanged();
+  });
+
+  const doCaption = guard(async () => {
+    if (!capText.trim()) return;
+    await api.caption(clip.id, {
+      text: capText,
+      position: capPos,
+      start: capTimed ? Number(capStart) : null,
+      end: capTimed ? Number(capEnd) : null,
+    });
+    setNote("Caption burned in → new clip created");
     await onChanged();
   });
 
@@ -236,6 +254,53 @@ export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }
             </label>
             <button onClick={doTrim} disabled={busy}>
               trim
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Caption (burn-in) → new clip</h3>
+          <input
+            className="full"
+            placeholder="caption text"
+            value={capText}
+            onChange={(e) => setCapText(e.target.value)}
+          />
+          <div className="row">
+            <select value={capPos} onChange={(e) => setCapPos(e.target.value)}>
+              <option value="bottom">bottom</option>
+              <option value="center">center</option>
+              <option value="top">top</option>
+            </select>
+            <label className="inline">
+              <input
+                type="checkbox"
+                checked={capTimed}
+                onChange={(e) => setCapTimed(e.target.checked)}
+              />
+              timed
+            </label>
+            {capTimed && (
+              <>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={capStart}
+                  onChange={(e) => setCapStart(e.target.value)}
+                  title="show from (s)"
+                />
+                <input
+                  type="number"
+                  step="0.1"
+                  value={capEnd}
+                  onChange={(e) => setCapEnd(e.target.value)}
+                  title="show until (s)"
+                />
+              </>
+            )}
+            <button onClick={doCaption} disabled={busy}>
+              burn in
             </button>
           </div>
         </section>
