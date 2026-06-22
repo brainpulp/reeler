@@ -12,8 +12,23 @@ if [ -f .env ]; then
 fi
 
 # --- backend ---
+# Reeler needs Python 3.11+. Pick the newest available interpreter.
+PYBIN=""
+for cand in python3.13 python3.12 python3.11 python3; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    ver="$("$cand" -c 'import sys; print("%d%d" % sys.version_info[:2])')"
+    if [ "$ver" -ge 311 ]; then PYBIN="$cand"; break; fi
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  echo "❌ Need Python 3.11+. On macOS: brew install python@3.11" >&2
+  exit 1
+fi
+
 if [ ! -d .venv ]; then
-  python3 -m venv .venv
+  echo "Creating venv with $PYBIN ($("$PYBIN" --version))"
+  "$PYBIN" -m venv .venv
+  ./.venv/bin/pip install -q --upgrade pip
   ./.venv/bin/pip install -q -r backend/requirements.txt
 fi
 ( cd backend && "$ROOT/.venv/bin/uvicorn" app.main:app --reload --port 8000 ) &
