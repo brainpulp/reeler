@@ -54,6 +54,7 @@ def build_session(cookie_file: str | None = None, username: str | None = None):
         save_metadata=False,
         compress_json=False,
         max_connection_attempts=1,  # fail fast on bad/expired auth
+        request_timeout=20.0,       # default is 300s — don't hang the request
         quiet=True,
     )
     jar = MozillaCookieJar(cookie_file)
