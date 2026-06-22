@@ -178,3 +178,32 @@ button.primary { background: var(--accent); border-color: var(--accent); }
 .card-edit input[type="number"] { width: 56px; }
 .card-edit input.bg { width: 70px; }
 .tl-x { padding: 2px 7px; }
+
+/* Timeline preview modal */
+.sheet.preview { width: 460px; }
+.pv-stage {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  max-height: 60vh;
+  margin: 0 auto;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pv-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.pv-card {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px;
+}
+.pv-card span { font-size: 28px; font-weight: 700; color: #fff; white-space: pre-wrap; }
+.pv-ruler { display: flex; gap: 2px; margin-top: 10px; height: 26px; }
+.pv-block {
+  flex-basis: 0; padding: 0; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--muted); font-size: 12px;
+}
+.pv-block.seg { background: #20303f; }
+.pv-block.card { background: #2f2030; border-style: dashed; }
+.pv-block.on { border-color: var(--accent); color: #fff; }
+.pv-controls { margin-top: 10px; }
+.pv-pos { color: var(--muted); font-size: 12px; }

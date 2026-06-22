@@ -17,7 +17,7 @@ handling, no anti-detection.
 | **Visualize** | Browse a grid of thumbnails, click to play |
 | **Annotate** | Per-clip title + description, plus free-text tags; filter by tag |
 | **Time-crop** | Mark labeled time-segments inside a clip (the reusable combine units) |
-| **Combine** | Assemble an ordered **timeline** of segments + text cards → new clip |
+| **Combine** | Assemble an ordered **timeline** of segments + text cards (with in-browser preview) → new clip |
 | **Edit** | Trim a clip to in/out points → new derived clip |
 | **Caption** | Burn on-screen text onto a clip (optionally for a time window) |
 | **Manipulate** | Change playback speed (the pattern for further transforms) |

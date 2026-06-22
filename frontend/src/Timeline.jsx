@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { api } from "./api.js";
+import TimelinePreview from "./TimelinePreview.jsx";
 
 // The combine surface: an ordered tray of segments and text cards that renders
 // into a single new clip. Lives pinned at the bottom of the app.
@@ -7,6 +8,7 @@ export default function Timeline({ items, setItems, onRendered }) {
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [preview, setPreview] = useState(false);
 
   const move = (i, dir) => {
     const j = i + dir;
@@ -58,6 +60,9 @@ export default function Timeline({ items, setItems, onRendered }) {
           onChange={(e) => setTitle(e.target.value)}
         />
         <button onClick={addCard}>+ text card</button>
+        <button onClick={() => setPreview(true)} disabled={items.length === 0}>
+          ▶ preview
+        </button>
         <button
           className="primary"
           onClick={render}
@@ -66,6 +71,9 @@ export default function Timeline({ items, setItems, onRendered }) {
           {busy ? "rendering…" : `Render (${items.length})`}
         </button>
       </div>
+      {preview && (
+        <TimelinePreview items={items} onClose={() => setPreview(false)} />
+      )}
       {err && <div className="error">⚠ {err}</div>}
       {items.length === 0 ? (
         <div className="tl-empty">
