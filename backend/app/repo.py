@@ -139,15 +139,15 @@ def all_tags(conn: sqlite3.Connection) -> list[str]:
 
 
 # --------------------------------------------------------------- metadata ----
-def update_metadata(
-    conn: sqlite3.Connection,
-    clip_id: int,
-    title: str | None,
-    description: str | None,
-) -> None:
+def update_metadata(conn: sqlite3.Connection, clip_id: int, fields: dict) -> None:
+    """Update only the provided metadata columns (partial patch)."""
+    allowed = {"title", "description"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    if not sets:
+        return
+    cols = ", ".join(f"{k} = ?" for k in sets)
     conn.execute(
-        "UPDATE clips SET title = ?, description = ? WHERE id = ?",
-        (title, description, clip_id),
+        f"UPDATE clips SET {cols} WHERE id = ?", (*sets.values(), clip_id)
     )
 
 

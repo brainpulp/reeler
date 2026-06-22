@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { api, fileUrl, thumbUrl } from "./api.js";
 import ClipDetail from "./ClipDetail.jsx";
 import Timeline from "./Timeline.jsx";
+import CardCaption from "./CardCaption.jsx";
 
 export default function App() {
   const [clips, setClips] = useState([]);
@@ -164,6 +165,7 @@ export default function App() {
                   {c.duration ? `${c.duration.toFixed(1)}s` : ""}
                 </span>
               </div>
+              <CardCaption clip={c} onChanged={refresh} />
               <div className="meta">
                 <span className="owner">
                   {c.source === "derived"

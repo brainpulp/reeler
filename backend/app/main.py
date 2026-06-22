@@ -228,7 +228,7 @@ def update_metadata(clip_id: int, req: MetadataRequest) -> dict:
     with db.get_conn() as conn:
         if not repo.get_clip(conn, clip_id):
             raise HTTPException(404, "clip not found")
-        repo.update_metadata(conn, clip_id, req.title, req.description)
+        repo.update_metadata(conn, clip_id, req.model_dump(exclude_unset=True))
         return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
 
 
@@ -283,7 +283,7 @@ def render_timeline(req: TimelineRequest) -> dict:
         op = {"type": "timeline", "items": [i.model_dump() for i in req.items]}
         new_id = repo.register_clip(conn, path=out, source="derived", op=op)
         if req.title:
-            repo.update_metadata(conn, new_id, req.title, None)
+            repo.update_metadata(conn, new_id, {"title": req.title})
         return repo._clip_to_dict(conn, repo.get_clip(conn, new_id))
 
 
