@@ -41,6 +41,14 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .upload-btn { display: inline-flex; align-items: center; }
 
 .error { background: #401; color: #fbb; padding: 8px 12px; border-radius: 8px; margin: 12px 0; }
+.info-banner { background: #034; color: #bdf; padding: 8px 12px; border-radius: 8px; margin: 12px 0; cursor: pointer; }
+.ig-badge {
+  display: inline-flex; align-items: center;
+  font-size: 12px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.ig-badge.ok { color: #8f8; }
+.ig-badge.off { color: var(--muted); }
 
 .tagbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0; }
 .tag {

@@ -12,6 +12,8 @@ export default function App() {
   const [timeline, setTimeline] = useState([]); // ordered combine items
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [ig, setIg] = useState(null); // instagram connection status
+  const [info, setInfo] = useState(null); // transient success message
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
@@ -21,9 +23,17 @@ export default function App() {
     setTags(data.tags);
   }, [activeTag]);
 
+  const checkIg = useCallback(() => {
+    api.igStatus().then(setIg).catch(() => setIg({ connected: false }));
+  }, []);
+
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
   }, [refresh]);
+
+  useEffect(() => {
+    checkIg();
+  }, [checkIg]);
 
   const run = async (fn) => {
     setBusy(true);
@@ -38,7 +48,16 @@ export default function App() {
     }
   };
 
-  const onIngest = () => run(() => api.ingest(12));
+  const onIngest = () =>
+    run(async () => {
+      const res = await api.ingest(12);
+      setInfo(
+        res.count
+          ? `Sniffed ${res.count} saved video${res.count === 1 ? "" : "s"}`
+          : "No new saved videos found"
+      );
+      checkIg();
+    });
   const onUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) run(() => api.upload(file));
@@ -70,7 +89,15 @@ export default function App() {
       <header>
         <h1>🎬 Reeler</h1>
         <div className="toolbar">
-          <button onClick={onIngest} disabled={busy}>
+          {ig && (
+            <span
+              className={"ig-badge " + (ig.connected ? "ok" : "off")}
+              title={ig.connected ? `signed in as @${ig.username}` : ig.error || "not connected"}
+            >
+              {ig.connected ? `● @${ig.username}` : "○ instagram"}
+            </span>
+          )}
+          <button onClick={onIngest} disabled={busy || !(ig && ig.connected)}>
             Sniff saved reels
           </button>
           <label className="upload-btn">
@@ -88,6 +115,11 @@ export default function App() {
       </header>
 
       {error && <div className="error">⚠ {error}</div>}
+      {info && (
+        <div className="info-banner" onClick={() => setInfo(null)}>
+          {info}
+        </div>
+      )}
 
       <div className="tagbar">
         <button

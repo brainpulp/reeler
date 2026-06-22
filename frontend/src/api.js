@@ -15,6 +15,7 @@ async function req(path, opts = {}) {
 
 export const api = {
   health: () => req("/health"),
+  igStatus: () => req("/ig/status"),
   listClips: (tag) => req(`/clips${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`),
   ingest: (limit) =>
     req("/ingest", { method: "POST", body: JSON.stringify({ limit }) }),

@@ -58,12 +58,24 @@ Reeler never sees your password. Instead:
 
 1. Log into Instagram in your browser.
 2. Export cookies for `instagram.com` in **Netscape `cookies.txt`** format
-   (e.g. the "Get cookies.txt LOCALLY" browser extension).
-3. Point `REELER_IG_COOKIE_FILE` at that file and set `REELER_IG_USERNAME`
-   in your `.env`.
-4. Click **Sniff saved reels** in the UI (or `POST /api/ingest`).
+   (e.g. the "Get cookies.txt LOCALLY" browser extension). The file must
+   include the `sessionid` and `csrftoken` cookies — these are what
+   authenticate the session.
+3. Point `REELER_IG_COOKIE_FILE` at that file in your `.env` and restart the
+   backend.
+4. The header shows a badge: **● @yourhandle** when the session authenticates,
+   or **○ instagram** with the reason on hover if not. `GET /api/ig/status`
+   exposes the same check.
+5. Once connected, click **Sniff saved reels** (or `POST /api/ingest`) to pull
+   your saved videos into the library.
 
-The cookie file and the `data/` directory are gitignored.
+The logged-in account is taken from the session itself (the saved-posts query
+requires it), so `REELER_IG_USERNAME` is optional. The cookie file and the
+`data/` directory are gitignored.
+
+> Note: Instagram periodically rotates the GraphQL query used for saved posts.
+> If sniffing starts returning errors, upgrading `instaloader`
+> (`pip install -U instaloader`) usually restores it.
 
 ## API
 

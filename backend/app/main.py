@@ -108,6 +108,18 @@ def health() -> dict:
 
 
 # ------------------------------------------------------- sniff / ingest ------
+@app.get("/api/ig/status")
+def ig_status() -> dict:
+    """Check whether the configured Instagram session authenticates."""
+    if not config.IG_COOKIE_FILE:
+        return {"connected": False, "error": "no cookie file configured"}
+    try:
+        _, username = instagram.build_session()
+        return {"connected": True, "username": username}
+    except Exception as exc:
+        return {"connected": False, "error": str(exc)}
+
+
 @app.post("/api/ingest")
 def ingest(req: IngestRequest) -> dict:
     """Fetch saved Instagram videos into the local library."""
@@ -117,19 +129,28 @@ def ingest(req: IngestRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
     added: list[dict] = []
-    with db.get_conn() as conn:
-        for post in instagram.iter_saved(loader, username, limit=req.limit):
-            try:
-                path = instagram.download_video(loader, post, config.LIBRARY_DIR)
-            except Exception as exc:  # network/availability hiccups per-post
-                continue
-            clip_id = repo.register_clip(
-                conn, path=path, source="instagram",
-                ig_shortcode=post.shortcode, ig_owner=post.owner,
-                caption=post.caption,
-            )
-            added.append({"id": clip_id, "shortcode": post.shortcode})
-    return {"added": added, "count": len(added)}
+    try:
+        with db.get_conn() as conn:
+            for post in instagram.iter_saved(loader, username, limit=req.limit):
+                try:
+                    path = instagram.download_video(
+                        loader, post, config.LIBRARY_DIR
+                    )
+                except Exception:  # network/availability hiccups per-post
+                    continue
+                clip_id = repo.register_clip(
+                    conn, path=path, source="instagram",
+                    ig_shortcode=post.shortcode, ig_owner=post.owner,
+                    caption=post.caption,
+                )
+                added.append({"id": clip_id, "shortcode": post.shortcode})
+    except Exception as exc:
+        # Auth expiry, rate limits, or Instagram changing its GraphQL schema.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Instagram fetch failed after {len(added)} clip(s): {exc}",
+        )
+    return {"added": added, "count": len(added), "username": username}
 
 
 @app.post("/api/upload")

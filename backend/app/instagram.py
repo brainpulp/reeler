@@ -53,18 +53,41 @@ def build_session(cookie_file: str | None = None, username: str | None = None):
         download_video_thumbnails=False,
         save_metadata=False,
         compress_json=False,
+        max_connection_attempts=1,  # fail fast on bad/expired auth
         quiet=True,
     )
     jar = MozillaCookieJar(cookie_file)
-    jar.load(ignore_discard=True, ignore_expires=True)
-    loader.context._session.cookies.update(jar)
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except Exception as exc:  # malformed / wrong-format file
+        raise RuntimeError(f"Could not read cookie file: {exc}")
+
+    # Inspect the user's exported cookies specifically — instaloader's own
+    # anonymous session already carries a csrftoken, so checking the merged
+    # session would mask a cookie file that's missing the logged-in token.
+    jar_cookies = {c.name: c.value for c in jar}
+    if "csrftoken" not in jar_cookies or "sessionid" not in jar_cookies:
+        raise RuntimeError(
+            "Cookie file is missing 'csrftoken'/'sessionid' for instagram.com — "
+            "export cookies for the instagram.com domain while logged in."
+        )
+
+    session = loader.context._session
+    session.cookies.update(jar)
+    # instaloader's own load_session sets this header; authenticated GraphQL
+    # queries (e.g. saved posts) are rejected without it.
+    session.headers.update({"X-CSRFToken": jar_cookies["csrftoken"]})
+
     test_login = loader.test_login()
     if not test_login:
         raise RuntimeError(
             "Instagram cookies did not authenticate. Re-export them while "
-            "logged in."
+            "logged in (they may have expired)."
         )
     loader.context.username = test_login
+    if username and username != test_login:
+        # The saved-posts query requires the logged-in account; honor it.
+        pass
     return loader, test_login
 
 
