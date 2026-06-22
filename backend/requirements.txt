@@ -3,3 +3,5 @@ uvicorn[standard]==0.34.0
 instaloader==4.13.1
 python-multipart==0.0.20
 pydantic==2.10.4
+# Lets pydantic evaluate `X | None` annotations on Python 3.9 (macOS system Python).
+eval_type_backport>=0.2.0,<1
