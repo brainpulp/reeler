@@ -11,6 +11,7 @@ REELER_IG_COOKIE_FILE at it.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
@@ -163,6 +164,7 @@ def iter_saved(loader, username: str, limit: int | None = None) -> Iterator[Fetc
         if not data.get("more_available") or not data.get("next_max_id"):
             break
         params["max_id"] = data["next_max_id"]
+        time.sleep(1.0)  # pace pagination to stay under rate limits
 
 
 def download_video(loader, post: FetchedPost, dest_dir: Path) -> Path:

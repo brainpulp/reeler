@@ -70,6 +70,12 @@ def get_clip(conn: sqlite3.Connection, clip_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
 
 
+def shortcode_exists(conn: sqlite3.Connection, shortcode: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM clips WHERE ig_shortcode = ? LIMIT 1", (shortcode,)
+    ).fetchone() is not None
+
+
 def clip_path(row: sqlite3.Row) -> Path:
     return config.DATA_DIR / row["rel_path"]
 

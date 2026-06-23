@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -128,10 +130,18 @@ def ingest(req: IngestRequest) -> dict:
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # req.limit is how many *new* reels to add this run (0 = as many as found).
+    target = req.limit if req.limit and req.limit > 0 else None
     added: list[dict] = []
+    skipped = 0
     try:
         with db.get_conn() as conn:
-            for post in instagram.iter_saved(loader, username, limit=req.limit):
+            # Iterate the whole saved feed; we decide when to stop based on how
+            # many new reels we've added, skipping ones already in the library.
+            for post in instagram.iter_saved(loader, username, limit=None):
+                if repo.shortcode_exists(conn, post.shortcode):
+                    skipped += 1
+                    continue
                 try:
                     path = instagram.download_video(
                         loader, post, config.LIBRARY_DIR
@@ -144,13 +154,21 @@ def ingest(req: IngestRequest) -> dict:
                     caption=post.caption,
                 )
                 added.append({"id": clip_id, "shortcode": post.shortcode})
+                conn.commit()  # persist incrementally so progress survives a stop
+                # Be gentle with Instagram to avoid rate-limit/action blocks.
+                time.sleep(1.0)
+                if target and len(added) >= target:
+                    break
     except Exception as exc:
-        # Auth expiry, rate limits, or Instagram changing its GraphQL schema.
+        # Auth expiry, rate limits, or Instagram changing its schema.
         raise HTTPException(
             status_code=502,
-            detail=f"Instagram fetch failed after {len(added)} clip(s): {exc}",
+            detail=f"Instagram fetch failed after {len(added)} new clip(s): {exc}",
         )
-    return {"added": added, "count": len(added), "username": username}
+    return {
+        "added": added, "count": len(added),
+        "skipped": skipped, "username": username,
+    }
 
 
 @app.post("/api/upload")
