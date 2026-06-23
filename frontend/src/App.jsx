@@ -15,6 +15,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ig, setIg] = useState(null); // instagram connection status
   const [info, setInfo] = useState(null); // transient success message
+  const [sniffCount, setSniffCount] = useState(24); // how many reels to pull (0 = all)
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
@@ -51,7 +52,7 @@ export default function App() {
 
   const onIngest = () =>
     run(async () => {
-      const res = await api.ingest(12);
+      const res = await api.ingest(Number(sniffCount) || 0);
       setInfo(
         res.count
           ? `Sniffed ${res.count} saved video${res.count === 1 ? "" : "s"}`
@@ -98,9 +99,19 @@ export default function App() {
               {ig.connected ? `● @${ig.username}` : "○ instagram"}
             </span>
           )}
-          <button onClick={onIngest} disabled={busy || !(ig && ig.connected)}>
-            Sniff saved reels
-          </button>
+          <span className="sniff-group">
+            <button onClick={onIngest} disabled={busy || !(ig && ig.connected)}>
+              {busy ? "Sniffing…" : "Sniff saved reels"}
+            </button>
+            <input
+              type="number"
+              className="sniff-count"
+              min="0"
+              value={sniffCount}
+              onChange={(e) => setSniffCount(e.target.value)}
+              title="How many saved reels to pull (0 = all)"
+            />
+          </span>
           <label className="upload-btn">
             Import file
             <input type="file" accept="video/*" hidden onChange={onUpload} />

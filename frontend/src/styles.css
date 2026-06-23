@@ -27,7 +27,9 @@ header {
 }
 h1 { font-size: 22px; margin: 0; }
 
-.toolbar { display: flex; gap: 8px; }
+.toolbar { display: flex; gap: 8px; align-items: center; }
+.sniff-group { display: inline-flex; gap: 4px; align-items: center; }
+.sniff-count { width: 56px; }
 button, .upload-btn {
   background: var(--panel);
   color: var(--fg);
