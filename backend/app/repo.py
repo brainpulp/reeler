@@ -80,23 +80,53 @@ def clip_path(row: sqlite3.Row) -> Path:
     return config.DATA_DIR / row["rel_path"]
 
 
-def list_clips(conn: sqlite3.Connection, tag: str | None = None) -> list[dict]:
+def list_clips(
+    conn: sqlite3.Connection,
+    tag: str | None = None,
+    collection: str | None = None,
+) -> list[dict]:
+    where, params = [], []
+    base = "SELECT c.* FROM clips c"
     if tag:
-        rows = conn.execute(
-            """
-            SELECT c.* FROM clips c
-            JOIN clip_tags ct ON ct.clip_id = c.id
-            JOIN tags t ON t.id = ct.tag_id
-            WHERE t.name = ?
-            ORDER BY c.created_at DESC
-            """,
-            (tag,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM clips ORDER BY created_at DESC"
-        ).fetchall()
+        base += (
+            " JOIN clip_tags ct ON ct.clip_id = c.id"
+            " JOIN tags t ON t.id = ct.tag_id"
+        )
+        where.append("t.name = ?")
+        params.append(tag)
+    if collection:
+        where.append("c.collection = ?")
+        params.append(collection)
+    sql = base + (" WHERE " + " AND ".join(where) if where else "")
+    sql += " ORDER BY c.created_at DESC"
+    rows = conn.execute(sql, params).fetchall()
     return [_clip_to_dict(conn, r) for r in rows]
+
+
+def all_collections(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT collection FROM clips "
+        "WHERE collection IS NOT NULL AND collection <> '' ORDER BY collection"
+    ).fetchall()
+    return [r["collection"] for r in rows]
+
+
+def set_collection(
+    conn: sqlite3.Connection, shortcode: str, collection: str,
+    owner: str | None = None, caption: str | None = None,
+) -> int:
+    """Tag a clip with its collection; backfill owner/caption if still empty."""
+    cur = conn.execute(
+        """
+        UPDATE clips
+           SET collection = ?,
+               ig_owner = COALESCE(NULLIF(ig_owner, ''), ?),
+               caption  = COALESCE(NULLIF(caption, ''), ?)
+         WHERE ig_shortcode = ?
+        """,
+        (collection, owner, caption, shortcode),
+    )
+    return cur.rowcount
 
 
 def _clip_to_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:

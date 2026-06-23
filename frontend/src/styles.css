@@ -63,6 +63,9 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font-size: 12px;
 }
 .tag.active { background: var(--accent); border-color: var(--accent); }
+.collbar { margin-top: 0; align-items: center; }
+.collbar .tag { border-radius: 6px; }
+.collbar-label { font-size: 13px; margin-right: 2px; }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
 

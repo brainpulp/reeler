@@ -16,12 +16,20 @@ async function req(path, opts = {}) {
 export const api = {
   health: () => req("/health"),
   igStatus: () => req("/ig/status"),
-  listClips: (tag) => req(`/clips${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`),
+  listClips: (tag, collection) => {
+    const q = new URLSearchParams();
+    if (tag) q.set("tag", tag);
+    if (collection) q.set("collection", collection);
+    const s = q.toString();
+    return req(`/clips${s ? `?${s}` : ""}`);
+  },
   startSniff: () => req("/sniff/start", { method: "POST", body: "{}" }),
   stopSniff: () => req("/sniff/stop", { method: "POST", body: "{}" }),
   sniffProgress: () => req("/sniff/progress"),
   scanLibrary: () => req("/library/scan", { method: "POST", body: "{}" }),
   scanProgress: () => req("/library/scan/progress"),
+  backfillCollections: () => req("/collections/backfill", { method: "POST", body: "{}" }),
+  collectionsProgress: () => req("/collections/backfill/progress"),
   upload: async (file) => {
     const fd = new FormData();
     fd.append("file", file);

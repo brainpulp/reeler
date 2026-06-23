@@ -7,7 +7,9 @@ import CardCaption from "./CardCaption.jsx";
 export default function App() {
   const [clips, setClips] = useState([]);
   const [tags, setTags] = useState([]);
+  const [collections, setCollections] = useState([]);
   const [activeTag, setActiveTag] = useState(null);
+  const [activeCollection, setActiveCollection] = useState(null);
   const [selected, setSelected] = useState([]); // ids picked for combine
   const [open, setOpen] = useState(null); // clip in detail view
   const [timeline, setTimeline] = useState([]); // ordered combine items
@@ -17,15 +19,17 @@ export default function App() {
   const [info, setInfo] = useState(null); // transient success message
   const [sniff, setSniff] = useState(null); // background sniff progress
   const [scan, setScan] = useState(null); // background library-scan progress
+  const [backfill, setBackfill] = useState(null); // collection backfill progress
   const pollRef = useRef(null);
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
   const refresh = useCallback(async () => {
-    const data = await api.listClips(activeTag);
+    const data = await api.listClips(activeTag, activeCollection);
     setClips(data.clips);
     setTags(data.tags);
-  }, [activeTag]);
+    setCollections(data.collections || []);
+  }, [activeTag, activeCollection]);
 
   const checkIg = useCallback(() => {
     api.igStatus().then(setIg).catch(() => setIg({ connected: false }));
@@ -57,14 +61,16 @@ export default function App() {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        const [sp, scp] = await Promise.all([
+        const [sp, scp, bf] = await Promise.all([
           api.sniffProgress(),
           api.scanProgress(),
+          api.collectionsProgress(),
         ]);
         setSniff(sp);
         setScan(scp);
+        setBackfill(bf);
         await refresh();
-        if (!sp.running && !scp.running) {
+        if (!sp.running && !scp.running && !bf.running) {
           clearInterval(pollRef.current);
           pollRef.current = null;
           if (sp.done) {
@@ -77,6 +83,12 @@ export default function App() {
               sp.error
                 ? `Sniff stopped: ${sp.error}`
                 : `${how} — ${sp.added} new, ${sp.skipped} already had`
+            );
+          } else if (bf.done) {
+            setInfo(
+              bf.error
+                ? `Backfill stopped: ${bf.error}`
+                : `Organized ${bf.added} reels into collections`
             );
           }
         }
@@ -106,14 +118,30 @@ export default function App() {
     }
   };
 
+  const onBackfill = async () => {
+    setError(null);
+    try {
+      const p = await api.backfillCollections();
+      setBackfill(p);
+      startPolling();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   // On load, reconnect to any job already running (sniff crawl or the
   // startup library scan) so the grid fills in live.
   useEffect(() => {
-    Promise.all([api.sniffProgress(), api.scanProgress()])
-      .then(([sp, scp]) => {
+    Promise.all([
+      api.sniffProgress(),
+      api.scanProgress(),
+      api.collectionsProgress(),
+    ])
+      .then(([sp, scp, bf]) => {
         setSniff(sp);
         setScan(scp);
-        if (sp.running || scp.running) startPolling();
+        setBackfill(bf);
+        if (sp.running || scp.running || bf.running) startPolling();
       })
       .catch(() => {});
     return () => pollRef.current && clearInterval(pollRef.current);
@@ -178,6 +206,19 @@ export default function App() {
                 Sniff saved reels
               </button>
             )}
+            {backfill && backfill.running ? (
+              <span className="sniff-progress">
+                organizing… {backfill.added} sorted
+              </span>
+            ) : (
+              <button
+                onClick={onBackfill}
+                disabled={!(ig && ig.connected)}
+                title="Map your Instagram collections onto downloaded reels (no re-downloads)"
+              >
+                Organize by collection
+              </button>
+            )}
           </span>
           <label className="upload-btn">
             Import file
@@ -217,6 +258,27 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {collections.length > 0 && (
+        <div className="tagbar collbar">
+          <span className="collbar-label">📁</span>
+          <button
+            className={!activeCollection ? "tag active" : "tag"}
+            onClick={() => setActiveCollection(null)}
+          >
+            all
+          </button>
+          {collections.map((c) => (
+            <button
+              key={c}
+              className={activeCollection === c ? "tag active" : "tag"}
+              onClick={() => setActiveCollection(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
 
       {clips.length === 0 ? (
         <div className="empty">

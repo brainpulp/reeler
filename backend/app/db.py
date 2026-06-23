@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS clips (
     caption      TEXT,
     title        TEXT,                     -- user annotation: short title
     description  TEXT,                     -- user annotation: longer notes
+    collection   TEXT,                     -- Instagram saved-collection name
     filename     TEXT NOT NULL,            -- basename on disk
     rel_path     TEXT NOT NULL,            -- path relative to DATA_DIR
     width        INTEGER,
@@ -84,7 +85,7 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns introduced after the first schema, for pre-existing dbs."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(clips)")}
-    for name in ("title", "description"):
+    for name in ("title", "description", "collection"):
         if name not in cols:
             conn.execute(f"ALTER TABLE clips ADD COLUMN {name} TEXT")
 

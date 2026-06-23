@@ -19,9 +19,9 @@ A lot was learned getting there; don't re-derive it.
 - **ffmpeg:** installed and on PATH.
 - **Instagram cookie:** `F:\downloads\www.instagram.com_cookies.txt`
   (Netscape cookies.txt with `sessionid` + `csrftoken`). Never commit it.
-- **Data dir:** currently `C:\Users\mxgld\reeler\data` (set via
-  `REELER_DATA_DIR`). Contains `library/` (the .mp4s), `derived/`, `thumbs/`,
-  and `reeler.db`.
+- **Data dir:** `F:\Users\mxgld\reeler\data` (set via `REELER_DATA_DIR` in
+  `RUN-REELER.bat`). Contains `library/` (the .mp4s), `derived/`, `thumbs/`,
+  and `reeler.db`. (Moved here from C: — Task 1 done.)
 - **Already downloaded:** ~**309 reels** in `C:\Users\mxgld\reeler\data\library`,
   named `{shortcode}.mp4`. They are catalogued into the DB by the startup
   "library scan" (filename = Instagram shortcode).
@@ -76,24 +76,33 @@ Key API routes: `/api/clips`, `/api/clips/{id}/{file,thumb}`,
 
 ## 🎯 PENDING TASKS (what the owner wants next)
 
-### Task 1 — Move the library from C: to F:
-The owner wants the videos (and all data) on the **F:** drive for space.
+### Task 1 — Move the library from C: to F: ✅ DONE
+Data now lives at `F:\Users\mxgld\reeler\data`; `RUN-REELER.bat` sets
+`REELER_DATA_DIR` accordingly. Moved with `robocopy /MOVE` (more robust than
+Move-Item across drives). Lesson: kill all `python.exe`/`node.exe` first so the
+DB isn't locked, and the **launcher's `REELER_DATA_DIR` line must actually point
+at F:** — a stale C: path silently makes the grid empty (`scan` sees 0 files).
 
-Because DB paths are relative to `DATA_DIR`, this is a clean move:
-1. Stop the app (close the backend window / `taskkill /F /IM python.exe /T`).
-2. Move the whole data folder:
-   `Move-Item C:\Users\mxgld\reeler\data F:\Users\mxgld\reeler\data`
-   (create `F:\Users\mxgld\reeler` first if needed).
-3. Update `RUN-REELER.bat` (and how you launch) to
-   `set REELER_DATA_DIR=F:\Users\mxgld\reeler\data`.
-4. Restart and confirm thumbnails/clips still load (rel_paths are unchanged).
+### Task 2 — Organize reels by Instagram collection ✅ BUILT (run backfill gently)
+Implemented as **grid grouping** (the owner's choice — a collection filter bar,
+no files moved). Run it via the **"Organize by collection"** button (or
+`POST /api/collections/backfill`); it's a paced, cancellable, **metadata-only**
+background job (`collections_worker`) that maps each named collection's reels
+onto local clips and backfills `collection`/owner/caption — **no video
+downloads**. Filter the grid with `GET /api/clips?collection=NAME`.
 
-Verify on the local machine; don't assume.
+Run it **after the account has rested** from the burst, and treat it like a
+sniff (one paced run, abort-and-wait on errors). Endpoint shapes
+(`/api/v1/collections/list/`, `/api/v1/feed/collection/{id}/posts/`) are coded
+defensively but unverified against a live account — if they 've drifted, the
+job will surface a clear error; adjust `instagram.list_collections` /
+`iter_collection_posts`.
 
-### Task 2 — Organize reels into collection-folders
-Instagram **Saved → Collections** are thematically named (e.g. "Recipes",
-"Travel"). The owner wants reels grouped by their collection — as folders /
-a browse dimension — for both already-downloaded reels and future sniffs.
+Still open / optional follow-ups:
+- Make the **sniff** collection-aware so *future* pulls record collection
+  directly (iterate per-collection feeds, or re-run the backfill after a sniff).
+- Optional: physical `library/{collection}/` folders (owner chose UI grouping
+  for now; would need `rel_path` updates in the same transaction).
 
 **Important provenance reality:** the 309 already-downloaded files carry only
 their **shortcode** (the filename). Collection, owner, and caption were NOT

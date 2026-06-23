@@ -167,6 +167,61 @@ def iter_saved(loader, username: str, limit: int | None = None) -> Iterator[Fetc
         time.sleep(1.0)  # pace pagination to stay under rate limits
 
 
+_COLLECTIONS_URL = "https://www.instagram.com/api/v1/collections/list/"
+_COLLECTION_FEED = "https://www.instagram.com/api/v1/feed/collection/{cid}/posts/"
+
+
+def list_collections(loader) -> list[dict]:
+    """Return the account's named saved-collections: [{id, name}, ...].
+
+    Skips the auto 'All Posts' collection (everything is already in the flat
+    saved feed); only user-named collections are useful for grouping.
+    """
+    session = loader.context._session
+    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    params = {"collection_types": '["MEDIA"]'}
+    resp = session.get(_COLLECTIONS_URL, params=params, headers=headers, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"collections list failed (HTTP {resp.status_code})")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise RuntimeError("collections list did not return JSON (session/rate-limit)")
+    out = []
+    for item in data.get("items", []):
+        if item.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
+            continue
+        cid = item.get("collection_id")
+        name = item.get("collection_name")
+        if cid and name:
+            out.append({"id": str(cid), "name": name})
+    return out
+
+
+def iter_collection_posts(loader, collection_id: str) -> Iterator[FetchedPost]:
+    """Yield video posts in one collection (paginated)."""
+    session = loader.context._session
+    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    url = _COLLECTION_FEED.format(cid=collection_id)
+    params: dict = {}
+    while True:
+        resp = session.get(url, params=params, headers=headers, timeout=20)
+        if resp.status_code != 200:
+            raise RuntimeError(f"collection feed failed (HTTP {resp.status_code})")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError("collection feed did not return JSON (session/rate-limit)")
+        for item in data.get("items", []):
+            media = item.get("media") or item
+            for post in _videos_in_media(media):
+                yield post
+        if not data.get("more_available") or not data.get("next_max_id"):
+            break
+        params["max_id"] = data["next_max_id"]
+        time.sleep(1.0)
+
+
 def download_video(loader, post: FetchedPost, dest_dir: Path) -> Path:
     """Download a single post's video file to dest_dir, return the path."""
     dest_dir.mkdir(parents=True, exist_ok=True)

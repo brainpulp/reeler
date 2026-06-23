@@ -147,6 +147,24 @@ def sniff_progress() -> dict:
     return jobs.sniff_job.status()
 
 
+@app.post("/api/collections/backfill")
+def collections_backfill(req: IngestRequest) -> dict:
+    """Map Instagram collections onto local clips (metadata only, no downloads)."""
+    if not (config.IG_COOKIE_FILE or req.cookie_file):
+        raise HTTPException(400, "no Instagram cookie configured")
+    started = jobs.collections_job.start(
+        jobs.collections_worker, req.cookie_file, req.username
+    )
+    if not started:
+        raise HTTPException(409, "a collection backfill is already running")
+    return jobs.collections_job.status()
+
+
+@app.get("/api/collections/backfill/progress")
+def collections_backfill_progress() -> dict:
+    return jobs.collections_job.status()
+
+
 @app.post("/api/library/scan")
 def library_scan() -> dict:
     """Register reels already downloaded to disk — local only, no Instagram."""
@@ -174,11 +192,12 @@ async def upload(file: UploadFile = File(...)) -> dict:
 
 # -------------------------------------------------------- visualize ----------
 @app.get("/api/clips")
-def list_clips(tag: str | None = None) -> dict:
+def list_clips(tag: str | None = None, collection: str | None = None) -> dict:
     with db.get_conn() as conn:
         return {
-            "clips": repo.list_clips(conn, tag=tag),
+            "clips": repo.list_clips(conn, tag=tag, collection=collection),
             "tags": repo.all_tags(conn),
+            "collections": repo.all_collections(conn),
         }
 
 

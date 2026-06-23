@@ -143,6 +143,38 @@ def scan_worker(job: Job) -> None:
                 continue
 
 
-# One job for downloading, one for the local scan.
+def collections_worker(job: Job, cookie_file, username) -> None:
+    """Map each saved collection's reels onto local clips — metadata only.
+
+    Fetches the account's named collections and their post lists, then sets the
+    `collection` (and backfills owner/caption) on clips we already have. Never
+    downloads a video. Paced, cancellable, and aborts on any Instagram error.
+    """
+    loader, uname = instagram.build_session(cookie_file, username)
+    job.state["username"] = uname
+    collections = instagram.list_collections(loader)
+    with db.get_conn() as conn:
+        for coll in collections:
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            for post in instagram.iter_collection_posts(loader, coll["id"]):
+                if job.cancelled():
+                    job.state["stopped"] = True
+                    break
+                job.state["seen"] += 1
+                updated = repo.set_collection(
+                    conn, post.shortcode, coll["name"], post.owner, post.caption
+                )
+                if updated:
+                    job.state["added"] += updated  # clips assigned a collection
+                else:
+                    job.state["skipped"] += 1  # in collection but not downloaded
+                conn.commit()
+            time.sleep(1.0)  # pace between collections
+
+
+# One job each for downloading, the local scan, and collection backfill.
 sniff_job = Job()
 scan_job = Job()
+collections_job = Job()
