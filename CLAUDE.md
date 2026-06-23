@@ -131,6 +131,42 @@ file-on-disk).
 
 ---
 
+## 🛡️ Instagram safety & sniff scheduling (POLICY — follow strictly)
+
+The owner has **1000+ saved videos** and already triggered one accidental burst
+that risked a temporary action-block. Protecting the account is a hard
+requirement. **Never** trade this away for speed.
+
+**Enforced in code (`jobs.py`) — do not weaken:**
+- **Per-run cap:** `MAX_NEW_PER_RUN = 150` network downloads. One sniff run can
+  never become a large burst. Reels already on disk are registered for free and
+  don't count.
+- **Jittered pacing:** `random.uniform(1.5, 3.0)s` between *real* downloads only.
+- **Cancellable:** the Stop button / `sniff_job.stop()` halts after the current
+  reel. Long jobs run server-side, so this is the only safe stop.
+- **Abort on trouble:** `iter_saved` raises on non-200 / empty-JSON (rate-limit
+  signals); the job records the error and stops. Treat any such error as a
+  rate-limit and back off.
+
+**Scheduling rules (follow these; bake into any scheduler you build):**
+1. **One sniff run per day, max.** Do not chain runs to drain the library
+   faster. At 150/day the ~1000 backlog fills in about a week — that's fine.
+2. **Minimum 24h between runs.** A scheduler must enforce this interval.
+3. **After any error/rate-limit, wait ≥24h** before the next attempt. After a
+   known burst (like today's), wait 24–48h before sniffing at all.
+4. **Routine cadence: weekly.** Re-sniff skips everything already saved and only
+   pulls new reels (small, fast), so the weekly job is light. Never more often
+   than weekly for routine use.
+5. **Never auto-run a sniff unattended without the cap + pacing + interval
+   checks.** The only thing that auto-runs on startup is the **local disk scan**
+   (`scan_worker`) — it makes **zero Instagram calls** and is always safe.
+6. **Backfilling collections (Task 2)** uses the same discipline: paced,
+   cancellable, metadata-only (no video downloads), abort-and-wait on errors.
+
+If you add a real scheduler (e.g. weekly), implement it as: check "last run
+≥ interval ago AND no recent error", run one capped sniff, record the
+timestamp/outcome, then wait. Surface it in the UI and keep the Stop button.
+
 ## Gotchas / lessons learned (don't repeat these)
 
 - **Python 3.14:** `pydantic`/`uvicorn[standard]` had no wheels and tried to

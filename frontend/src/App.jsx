@@ -68,10 +68,15 @@ export default function App() {
           clearInterval(pollRef.current);
           pollRef.current = null;
           if (sp.done) {
+            const how = sp.stopped
+              ? "Stopped"
+              : sp.capped
+              ? "Safe batch limit reached — run again later for more"
+              : "Done";
             setInfo(
               sp.error
                 ? `Sniff stopped: ${sp.error}`
-                : `${sp.stopped ? "Stopped" : "Done"} — ${sp.added} new, ${sp.skipped} already had`
+                : `${how} — ${sp.added} new, ${sp.skipped} already had`
             );
           }
         }

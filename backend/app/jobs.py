@@ -9,10 +9,19 @@ Two workers:
 """
 from __future__ import annotations
 
+import random
 import threading
 import time
 
 from . import config, db, instagram, repo
+
+# --- Instagram safety limits (see CLAUDE.md "Instagram safety & scheduling") ---
+# A single sniff run never downloads more than this many *new* reels, so one
+# click/run can't become a 1000-video burst that risks an action-block.
+MAX_NEW_PER_RUN = 150
+# Jittered delay between real network downloads (seconds). Randomized so the
+# request cadence doesn't look robotic.
+PACE_MIN, PACE_MAX = 1.5, 3.0
 
 
 class Job:
@@ -26,8 +35,9 @@ class Job:
 
     def _reset(self) -> None:
         self.state: dict = {
-            "running": False, "added": 0, "skipped": 0, "seen": 0,
-            "done": False, "stopped": False, "error": None, "username": None,
+            "running": False, "added": 0, "downloaded": 0, "skipped": 0,
+            "seen": 0, "done": False, "stopped": False, "capped": False,
+            "error": None, "username": None,
         }
 
     def status(self) -> dict:
@@ -70,8 +80,15 @@ def _register(conn, post_or_code, owner=None, caption=None, path=None) -> None:
     conn.commit()
 
 
-def sniff_worker(job: Job, cookie_file, username, pause: float = 1.0) -> None:
-    """Crawl saved reels and download new ones, paced and resumable."""
+def sniff_worker(job: Job, cookie_file, username,
+                 max_new: int = MAX_NEW_PER_RUN) -> None:
+    """Crawl saved reels and download new ones — paced, capped, and resumable.
+
+    Stops after `max_new` *network downloads* (the safety cap), on cancel, or
+    when the feed is exhausted. Reels already on disk are registered for free
+    and don't count against the cap. Any Instagram error aborts the run (the
+    feed iterator raises on non-200 / rate-limit responses).
+    """
     loader, uname = instagram.build_session(cookie_file, username)
     job.state["username"] = uname
     with db.get_conn() as conn:
@@ -88,13 +105,18 @@ def sniff_worker(job: Job, cookie_file, username, pause: float = 1.0) -> None:
                 _register(conn, post.shortcode, post.owner, post.caption, dest)
                 job.state["added"] += 1
                 continue
+            # Safety cap: never let one run become a large burst.
+            if max_new and job.state["downloaded"] >= max_new:
+                job.state["capped"] = True
+                break
             try:
                 path = instagram.download_video(loader, post, config.LIBRARY_DIR)
             except Exception:
                 continue
             _register(conn, post.shortcode, post.owner, post.caption, path)
             job.state["added"] += 1
-            time.sleep(pause)  # pace only real downloads
+            job.state["downloaded"] += 1
+            time.sleep(random.uniform(PACE_MIN, PACE_MAX))  # jittered, real downloads only
 
 
 def scan_worker(job: Job) -> None:
