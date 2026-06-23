@@ -17,8 +17,9 @@ export const api = {
   health: () => req("/health"),
   igStatus: () => req("/ig/status"),
   listClips: (tag) => req(`/clips${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`),
-  ingest: (limit) =>
-    req("/ingest", { method: "POST", body: JSON.stringify({ limit }) }),
+  startSniff: () => req("/sniff/start", { method: "POST", body: "{}" }),
+  stopSniff: () => req("/sniff/stop", { method: "POST", body: "{}" }),
+  sniffProgress: () => req("/sniff/progress"),
   upload: async (file) => {
     const fd = new FormData();
     fd.append("file", file);

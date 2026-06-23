@@ -28,8 +28,10 @@ header {
 h1 { font-size: 22px; margin: 0; }
 
 .toolbar { display: flex; gap: 8px; align-items: center; }
-.sniff-group { display: inline-flex; gap: 4px; align-items: center; }
-.sniff-count { width: 56px; }
+.sniff-group { display: inline-flex; gap: 6px; align-items: center; }
+button.stop { background: #5a1620; border-color: #a3303f; }
+button.stop:hover { border-color: #e1306c; }
+.sniff-progress { font-size: 12px; color: var(--muted); white-space: nowrap; }
 button, .upload-btn {
   background: var(--panel);
   color: var(--fg);

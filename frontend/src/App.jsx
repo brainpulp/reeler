@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { api, fileUrl, thumbUrl } from "./api.js";
 import ClipDetail from "./ClipDetail.jsx";
 import Timeline from "./Timeline.jsx";
@@ -15,7 +15,8 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ig, setIg] = useState(null); // instagram connection status
   const [info, setInfo] = useState(null); // transient success message
-  const [sniffCount, setSniffCount] = useState(24); // how many reels to pull (0 = all)
+  const [sniff, setSniff] = useState(null); // background sniff progress
+  const pollRef = useRef(null);
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
@@ -50,16 +51,60 @@ export default function App() {
     }
   };
 
-  const onIngest = () =>
-    run(async () => {
-      const res = await api.ingest(Number(sniffCount) || 0);
-      setInfo(
-        res.count
-          ? `Sniffed ${res.count} saved video${res.count === 1 ? "" : "s"}`
-          : "No new saved videos found"
-      );
-      checkIg();
-    });
+  // Poll sniff progress, refresh the grid as clips arrive, and stop when done.
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const p = await api.sniffProgress();
+        setSniff(p);
+        await refresh();
+        if (!p.running) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setInfo(
+            p.error
+              ? `Sniff stopped: ${p.error}`
+              : `${p.stopped ? "Stopped" : "Done"} — ${p.added} new, ${p.skipped} already had`
+          );
+        }
+      } catch {
+        /* transient; keep polling */
+      }
+    }, 2500);
+  }, [refresh]);
+
+  const onSniff = async () => {
+    setError(null);
+    try {
+      const p = await api.startSniff();
+      setSniff(p);
+      startPolling();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const onStopSniff = async () => {
+    try {
+      const p = await api.stopSniff();
+      setSniff(p);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  // Reconnect to an in-progress sniff if the page was reloaded mid-crawl.
+  useEffect(() => {
+    api.sniffProgress().then((p) => {
+      if (p.running) {
+        setSniff(p);
+        startPolling();
+      }
+    }).catch(() => {});
+    return () => pollRef.current && clearInterval(pollRef.current);
+  }, [startPolling]);
+
   const onUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) run(() => api.upload(file));
@@ -100,17 +145,20 @@ export default function App() {
             </span>
           )}
           <span className="sniff-group">
-            <button onClick={onIngest} disabled={busy || !(ig && ig.connected)}>
-              {busy ? "Sniffing…" : "Sniff saved reels"}
-            </button>
-            <input
-              type="number"
-              className="sniff-count"
-              min="0"
-              value={sniffCount}
-              onChange={(e) => setSniffCount(e.target.value)}
-              title="How many saved reels to pull (0 = all)"
-            />
+            {sniff && sniff.running ? (
+              <>
+                <button className="stop" onClick={onStopSniff}>
+                  ■ Stop sniff
+                </button>
+                <span className="sniff-progress">
+                  {sniff.added} new · {sniff.skipped} skipped
+                </span>
+              </>
+            ) : (
+              <button onClick={onSniff} disabled={!(ig && ig.connected)}>
+                Sniff saved reels
+              </button>
+            )}
           </span>
           <label className="upload-btn">
             Import file

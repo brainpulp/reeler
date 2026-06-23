@@ -12,15 +12,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import time
-
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, instagram, media, repo
+from . import config, db, instagram, jobs, media, repo
 
 app = FastAPI(title="Reeler", version="0.1.0")
 
@@ -122,53 +120,28 @@ def ig_status() -> dict:
         return {"connected": False, "error": str(exc)}
 
 
-@app.post("/api/ingest")
-def ingest(req: IngestRequest) -> dict:
-    """Fetch saved Instagram videos into the local library."""
-    try:
-        loader, username = instagram.build_session(req.cookie_file, req.username)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+@app.post("/api/sniff/start")
+def sniff_start(req: IngestRequest) -> dict:
+    """Begin a background crawl of the saved collection (skips existing)."""
+    if not (config.IG_COOKIE_FILE or req.cookie_file):
+        raise HTTPException(400, "no Instagram cookie configured")
+    started = jobs.job.start(req.cookie_file, req.username)
+    if not started:
+        raise HTTPException(409, "a sniff is already running")
+    return jobs.job.status()
 
-    # req.limit is how many *new* reels to add this run (0 = as many as found).
-    target = req.limit if req.limit and req.limit > 0 else None
-    added: list[dict] = []
-    skipped = 0
-    try:
-        with db.get_conn() as conn:
-            # Iterate the whole saved feed; we decide when to stop based on how
-            # many new reels we've added, skipping ones already in the library.
-            for post in instagram.iter_saved(loader, username, limit=None):
-                if repo.shortcode_exists(conn, post.shortcode):
-                    skipped += 1
-                    continue
-                try:
-                    path = instagram.download_video(
-                        loader, post, config.LIBRARY_DIR
-                    )
-                except Exception:  # network/availability hiccups per-post
-                    continue
-                clip_id = repo.register_clip(
-                    conn, path=path, source="instagram",
-                    ig_shortcode=post.shortcode, ig_owner=post.owner,
-                    caption=post.caption,
-                )
-                added.append({"id": clip_id, "shortcode": post.shortcode})
-                conn.commit()  # persist incrementally so progress survives a stop
-                # Be gentle with Instagram to avoid rate-limit/action blocks.
-                time.sleep(1.0)
-                if target and len(added) >= target:
-                    break
-    except Exception as exc:
-        # Auth expiry, rate limits, or Instagram changing its schema.
-        raise HTTPException(
-            status_code=502,
-            detail=f"Instagram fetch failed after {len(added)} new clip(s): {exc}",
-        )
-    return {
-        "added": added, "count": len(added),
-        "skipped": skipped, "username": username,
-    }
+
+@app.post("/api/sniff/stop")
+def sniff_stop() -> dict:
+    """Ask the running crawl to stop after the current reel."""
+    jobs.job.stop()
+    return jobs.job.status()
+
+
+@app.get("/api/sniff/progress")
+def sniff_progress() -> dict:
+    """Live progress of the crawl (poll this from the UI)."""
+    return jobs.job.status()
 
 
 @app.post("/api/upload")
