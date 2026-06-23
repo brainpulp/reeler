@@ -35,6 +35,9 @@ app.add_middleware(
 def _startup() -> None:
     config.ensure_dirs()
     db.init_db()
+    # Catalogue any reels already on disk (e.g. from a prior/interrupted run)
+    # in the background — purely local, no Instagram calls.
+    jobs.scan_job.start(jobs.scan_worker)
 
 
 # ---------------------------------------------------------------- models -----
@@ -125,23 +128,35 @@ def sniff_start(req: IngestRequest) -> dict:
     """Begin a background crawl of the saved collection (skips existing)."""
     if not (config.IG_COOKIE_FILE or req.cookie_file):
         raise HTTPException(400, "no Instagram cookie configured")
-    started = jobs.job.start(req.cookie_file, req.username)
+    started = jobs.sniff_job.start(jobs.sniff_worker, req.cookie_file, req.username)
     if not started:
         raise HTTPException(409, "a sniff is already running")
-    return jobs.job.status()
+    return jobs.sniff_job.status()
 
 
 @app.post("/api/sniff/stop")
 def sniff_stop() -> dict:
     """Ask the running crawl to stop after the current reel."""
-    jobs.job.stop()
-    return jobs.job.status()
+    jobs.sniff_job.stop()
+    return jobs.sniff_job.status()
 
 
 @app.get("/api/sniff/progress")
 def sniff_progress() -> dict:
     """Live progress of the crawl (poll this from the UI)."""
-    return jobs.job.status()
+    return jobs.sniff_job.status()
+
+
+@app.post("/api/library/scan")
+def library_scan() -> dict:
+    """Register reels already downloaded to disk — local only, no Instagram."""
+    jobs.scan_job.start(jobs.scan_worker)
+    return jobs.scan_job.status()
+
+
+@app.get("/api/library/scan/progress")
+def library_scan_progress() -> dict:
+    return jobs.scan_job.status()
 
 
 @app.post("/api/upload")

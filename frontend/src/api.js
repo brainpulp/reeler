@@ -20,6 +20,8 @@ export const api = {
   startSniff: () => req("/sniff/start", { method: "POST", body: "{}" }),
   stopSniff: () => req("/sniff/stop", { method: "POST", body: "{}" }),
   sniffProgress: () => req("/sniff/progress"),
+  scanLibrary: () => req("/library/scan", { method: "POST", body: "{}" }),
+  scanProgress: () => req("/library/scan/progress"),
   upload: async (file) => {
     const fd = new FormData();
     fd.append("file", file);

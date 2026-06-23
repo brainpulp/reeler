@@ -1,9 +1,11 @@
-"""Background saved-reel sniffing with live progress and a stop switch.
+"""Background jobs with live progress and a stop switch.
 
-Runs the long crawl in a daemon thread so the API stays responsive, the UI can
-poll progress, and the user can stop it instantly. Safe to re-run: reels already
-in the library (or already downloaded to disk) are skipped without hitting
-Instagram, and only real network downloads are paced.
+A generic Job runs a worker function in a daemon thread so the API stays
+responsive, the UI can poll progress, and the user can stop it instantly.
+
+Two workers:
+- sniff: crawl the saved collection and download new reels (paced, network).
+- scan: register reels already on disk into the library (local, no network).
 """
 from __future__ import annotations
 
@@ -13,7 +15,9 @@ import time
 from . import config, db, instagram, repo
 
 
-class SniffJob:
+class Job:
+    """Runs one worker at a time, exposing a pollable progress dict."""
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cancel = threading.Event()
@@ -29,9 +33,10 @@ class SniffJob:
     def status(self) -> dict:
         return dict(self.state)
 
-    def start(self, cookie_file: str | None, username: str | None,
-              pause: float = 1.0) -> bool:
-        """Begin a crawl. Returns False if one is already running."""
+    def cancelled(self) -> bool:
+        return self._cancel.is_set()
+
+    def start(self, worker, *args) -> bool:
         with self._lock:
             if self.state["running"]:
                 return False
@@ -39,7 +44,7 @@ class SniffJob:
             self._reset()
             self.state["running"] = True
             self._thread = threading.Thread(
-                target=self._run, args=(cookie_file, username, pause), daemon=True
+                target=self._run, args=(worker, args), daemon=True
             )
             self._thread.start()
             return True
@@ -47,49 +52,9 @@ class SniffJob:
     def stop(self) -> None:
         self._cancel.set()
 
-    def _run(self, cookie_file, username, pause) -> None:
+    def _run(self, worker, args) -> None:
         try:
-            loader, uname = instagram.build_session(cookie_file, username)
-            self.state["username"] = uname
-            with db.get_conn() as conn:
-                for post in instagram.iter_saved(loader, uname, limit=None):
-                    if self._cancel.is_set():
-                        self.state["stopped"] = True
-                        break
-                    self.state["seen"] += 1
-
-                    # Already catalogued — nothing to do, no network hit.
-                    if repo.shortcode_exists(conn, post.shortcode):
-                        self.state["skipped"] += 1
-                        continue
-
-                    dest = config.LIBRARY_DIR / f"{post.shortcode}.mp4"
-                    if dest.exists():
-                        # Downloaded on a prior run but not catalogued; register
-                        # it locally without re-downloading from Instagram.
-                        repo.register_clip(
-                            conn, path=dest, source="instagram",
-                            ig_shortcode=post.shortcode, ig_owner=post.owner,
-                            caption=post.caption,
-                        )
-                        conn.commit()
-                        self.state["added"] += 1
-                        continue
-
-                    try:
-                        path = instagram.download_video(
-                            loader, post, config.LIBRARY_DIR
-                        )
-                    except Exception:  # per-post network hiccup; skip it
-                        continue
-                    repo.register_clip(
-                        conn, path=path, source="instagram",
-                        ig_shortcode=post.shortcode, ig_owner=post.owner,
-                        caption=post.caption,
-                    )
-                    conn.commit()
-                    self.state["added"] += 1
-                    time.sleep(pause)  # pace only real downloads
+            worker(self, *args)
         except Exception as exc:
             self.state["error"] = str(exc)
         finally:
@@ -97,5 +62,65 @@ class SniffJob:
             self.state["done"] = True
 
 
-# Single shared job for this single-user local app.
-job = SniffJob()
+def _register(conn, post_or_code, owner=None, caption=None, path=None) -> None:
+    repo.register_clip(
+        conn, path=path, source="instagram",
+        ig_shortcode=post_or_code, ig_owner=owner, caption=caption,
+    )
+    conn.commit()
+
+
+def sniff_worker(job: Job, cookie_file, username, pause: float = 1.0) -> None:
+    """Crawl saved reels and download new ones, paced and resumable."""
+    loader, uname = instagram.build_session(cookie_file, username)
+    job.state["username"] = uname
+    with db.get_conn() as conn:
+        for post in instagram.iter_saved(loader, uname, limit=None):
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            job.state["seen"] += 1
+            if repo.shortcode_exists(conn, post.shortcode):
+                job.state["skipped"] += 1
+                continue
+            dest = config.LIBRARY_DIR / f"{post.shortcode}.mp4"
+            if dest.exists():  # downloaded before; register without a network hit
+                _register(conn, post.shortcode, post.owner, post.caption, dest)
+                job.state["added"] += 1
+                continue
+            try:
+                path = instagram.download_video(loader, post, config.LIBRARY_DIR)
+            except Exception:
+                continue
+            _register(conn, post.shortcode, post.owner, post.caption, path)
+            job.state["added"] += 1
+            time.sleep(pause)  # pace only real downloads
+
+
+def scan_worker(job: Job) -> None:
+    """Register any .mp4 in the library that isn't catalogued yet — no network.
+
+    Filenames are the Instagram shortcode (how the downloader names them), so we
+    can surface reels downloaded on a previous run without touching Instagram.
+    """
+    files = sorted(config.LIBRARY_DIR.glob("*.mp4"))
+    with db.get_conn() as conn:
+        for f in files:
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            job.state["seen"] += 1
+            shortcode = f.stem
+            if repo.shortcode_exists(conn, shortcode):
+                job.state["skipped"] += 1
+                continue
+            try:
+                _register(conn, shortcode, None, None, f)
+                job.state["added"] += 1
+            except Exception:
+                continue
+
+
+# One job for downloading, one for the local scan.
+sniff_job = Job()
+scan_job = Job()

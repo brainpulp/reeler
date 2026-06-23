@@ -16,6 +16,7 @@ export default function App() {
   const [ig, setIg] = useState(null); // instagram connection status
   const [info, setInfo] = useState(null); // transient success message
   const [sniff, setSniff] = useState(null); // background sniff progress
+  const [scan, setScan] = useState(null); // background library-scan progress
   const pollRef = useRef(null);
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
@@ -51,22 +52,28 @@ export default function App() {
     }
   };
 
-  // Poll sniff progress, refresh the grid as clips arrive, and stop when done.
+  // Poll both background jobs, refresh the grid as clips arrive, stop when idle.
   const startPolling = useCallback(() => {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        const p = await api.sniffProgress();
-        setSniff(p);
+        const [sp, scp] = await Promise.all([
+          api.sniffProgress(),
+          api.scanProgress(),
+        ]);
+        setSniff(sp);
+        setScan(scp);
         await refresh();
-        if (!p.running) {
+        if (!sp.running && !scp.running) {
           clearInterval(pollRef.current);
           pollRef.current = null;
-          setInfo(
-            p.error
-              ? `Sniff stopped: ${p.error}`
-              : `${p.stopped ? "Stopped" : "Done"} — ${p.added} new, ${p.skipped} already had`
-          );
+          if (sp.done) {
+            setInfo(
+              sp.error
+                ? `Sniff stopped: ${sp.error}`
+                : `${sp.stopped ? "Stopped" : "Done"} — ${sp.added} new, ${sp.skipped} already had`
+            );
+          }
         }
       } catch {
         /* transient; keep polling */
@@ -94,14 +101,16 @@ export default function App() {
     }
   };
 
-  // Reconnect to an in-progress sniff if the page was reloaded mid-crawl.
+  // On load, reconnect to any job already running (sniff crawl or the
+  // startup library scan) so the grid fills in live.
   useEffect(() => {
-    api.sniffProgress().then((p) => {
-      if (p.running) {
-        setSniff(p);
-        startPolling();
-      }
-    }).catch(() => {});
+    Promise.all([api.sniffProgress(), api.scanProgress()])
+      .then(([sp, scp]) => {
+        setSniff(sp);
+        setScan(scp);
+        if (sp.running || scp.running) startPolling();
+      })
+      .catch(() => {});
     return () => pollRef.current && clearInterval(pollRef.current);
   }, [startPolling]);
 
@@ -145,6 +154,11 @@ export default function App() {
             </span>
           )}
           <span className="sniff-group">
+            {scan && scan.running && (
+              <span className="sniff-progress">
+                importing {scan.added} from disk…
+              </span>
+            )}
             {sniff && sniff.running ? (
               <>
                 <button className="stop" onClick={onStopSniff}>
