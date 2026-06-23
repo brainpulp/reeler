@@ -65,6 +65,9 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Background sniff writes while the UI reads; wait rather than erroring on locks.
+    conn.execute("PRAGMA busy_timeout = 8000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
