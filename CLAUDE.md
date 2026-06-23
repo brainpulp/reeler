@@ -55,7 +55,8 @@ Backend files:
   clip paths in the DB are stored **relative to `DATA_DIR`** (`rel_path`), so the
   whole `data/` folder can be moved as long as `REELER_DATA_DIR` follows it.
 - `db.py` — schema + WAL/busy_timeout. Tables: `clips`, `tags`, `clip_tags`,
-  `segments`.
+  `segments`. Clips carry `media_id`, `has_video`, `kept`, `collection` for the
+  metadata-first model (below).
 - `instagram.py` — `build_session` (cookie import + CSRF header + fast timeouts),
   `iter_saved` (private web API `/api/v1/feed/saved/posts/`, paginated),
   `download_video`.
@@ -139,6 +140,40 @@ already on disk (`scan_worker`/`sniff_worker` already skip by shortcode and by
 file-on-disk).
 
 ---
+
+## 🗂️ Metadata-first / lazy-download model (the owner's chosen design)
+
+The owner wants **organized access to everything, but bytes saved only when they
+choose**. So a clip has three states:
+- **Indexed** (`has_video=0`): metadata + a cached thumbnail only. The cheap
+  catalog — browse/tag/organize 1000+ reels having downloaded ~nothing.
+- **Working copy** (`has_video=1, kept=0`): the real video, pulled **lazily**
+  only when needed (play/trim/segment/caption/export). Auto-cleanable.
+- **Kept** (`kept=1`): explicitly persisted — exports, uploads, and reels the
+  owner chooses to keep. Never auto-cleaned.
+
+Flow & endpoints:
+- **`jobs.index_worker`** (`POST /api/index/start|stop`, `/progress`):
+  metadata-first catalog pull — stores metadata + thumbnail per reel, **no
+  video**. Same safety discipline as the sniff (paced jitter, `MAX_INDEX_PER_RUN
+  = 300`, cancellable, abort-on-error). This is the preferred way to build the
+  library now; the old full-download **sniff** still exists for bulk grabs.
+- **`POST /api/clips/{id}/ensure`** downloads one reel on demand
+  (`instagram.fetch_fresh_video_url` re-fetches a current URL by `media_id`,
+  since CDN URLs expire). Edits/timeline/combine call `_resolve_video` to ensure
+  sources first; `/file` returns 409 if not downloaded.
+- **`POST /api/clips/{id}/keep?keep=`** toggles `kept`.
+- **`POST /api/library/clean`** deletes non-kept working copies (`repo.clean_working_copies`).
+- Derived outputs (trim/speed/caption/combine/timeline) and uploads are `kept=1`.
+
+The existing 309 reels were migrated to `has_video=1, kept=1` (real files, keep
+them). UI: "Index saved reels" button + cataloguing progress; cards show ⤓
+(indexed) / ★ (kept) badges; the detail panel offers "Download to play & edit"
+for indexed reels and a keep toggle; "Free space" clears working copies.
+
+NOTE: the lazy-download path (`/media/{id}/info/` refetch + thumbnail URLs) is
+coded defensively but **unverified against live Instagram** — verify shapes on
+the owner's machine and treat errors as rate-limit signals (back off).
 
 ## 🛡️ Instagram safety & sniff scheduling (POLICY — follow strictly)
 

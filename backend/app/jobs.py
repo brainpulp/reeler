@@ -174,7 +174,55 @@ def collections_worker(job: Job, cookie_file, username) -> None:
             time.sleep(1.0)  # pace between collections
 
 
-# One job each for downloading, the local scan, and collection backfill.
+MAX_INDEX_PER_RUN = 300  # thumbnails are light, but still cap per run
+
+
+def index_worker(job: Job, cookie_file, username,
+                 max_new: int = MAX_INDEX_PER_RUN) -> None:
+    """Metadata-first catalog: store metadata + a thumbnail per reel, NO video.
+
+    This is the cheap 'organized access' pull — browse 1000+ reels having
+    downloaded almost nothing. Videos are fetched lazily later, only when used.
+    Same safety discipline as the sniff (paced, capped, cancellable, abort-on-error).
+    """
+    loader, uname = instagram.build_session(cookie_file, username)
+    job.state["username"] = uname
+    with db.get_conn() as conn:
+        for post in instagram.iter_saved(loader, uname, limit=None):
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            job.state["seen"] += 1
+            if repo.shortcode_exists(conn, post.shortcode):
+                job.state["skipped"] += 1
+                continue
+            if max_new and job.state["downloaded"] >= max_new:
+                job.state["capped"] = True
+                break
+            thumb_rel = None
+            if post.thumb_url:
+                try:
+                    dest = config.THUMBS_DIR / f"{post.shortcode}.jpg"
+                    instagram.download_thumbnail(loader, post.thumb_url, dest)
+                    thumb_rel = str(dest.relative_to(config.DATA_DIR))
+                except Exception:
+                    thumb_rel = None
+            planned_rel = str(
+                (config.LIBRARY_DIR / f"{post.shortcode}.mp4").relative_to(config.DATA_DIR)
+            )
+            repo.register_indexed(
+                conn, shortcode=post.shortcode, media_id=post.media_id,
+                owner=post.owner, caption=post.caption,
+                thumb_rel=thumb_rel, planned_rel=planned_rel,
+            )
+            conn.commit()
+            job.state["added"] += 1
+            job.state["downloaded"] += 1  # thumbnail fetch = the network action
+            time.sleep(random.uniform(0.6, 1.4))
+
+
+# Jobs: full download sniff, local scan, collection backfill, metadata index.
 sniff_job = Job()
 scan_job = Job()
 collections_job = Job()
+index_job = Job()

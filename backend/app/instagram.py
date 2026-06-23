@@ -26,6 +26,8 @@ class FetchedPost:
     owner: str
     caption: str
     video_url: str
+    media_id: str = ""      # Instagram media pk, for re-fetching fresh URLs later
+    thumb_url: str = ""     # poster image URL (for the metadata-only catalog)
 
 
 def _load_instaloader():
@@ -120,13 +122,48 @@ def _videos_in_media(media: dict) -> list[FetchedPost]:
         code = slide.get("code") or base_code
         # Disambiguate multiple video slides under one post so DB rows don't collide.
         shortcode = code if len(slides) == 1 else f"{code}_{i}"
+        thumbs = (slide.get("image_versions2") or {}).get("candidates") or []
         out.append(FetchedPost(
             shortcode=shortcode,
             owner=owner,
             caption=caption,
             video_url=versions[0]["url"],
+            media_id=str(slide.get("pk") or slide.get("id") or media.get("pk") or ""),
+            thumb_url=thumbs[0]["url"] if thumbs else "",
         ))
     return out
+
+
+def download_thumbnail(loader, url: str, dest: Path) -> Path:
+    """Download a poster image (small) for the metadata-only catalog."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    loader.context.get_and_write_raw(url, str(dest))
+    return dest
+
+
+def fetch_fresh_video_url(loader, media_id: str) -> str:
+    """Re-fetch a current (unexpired) video URL for a media by its pk.
+
+    Instagram CDN URLs expire, so a reel indexed days ago needs a fresh URL
+    before it can be downloaded. Uses the media-info endpoint.
+    """
+    session = loader.context._session
+    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    url = f"https://www.instagram.com/api/v1/media/{media_id}/info/"
+    resp = session.get(url, headers=headers, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"media info failed (HTTP {resp.status_code})")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise RuntimeError("media info did not return JSON (session/rate-limit)")
+    items = data.get("items") or []
+    if not items:
+        raise RuntimeError("media info returned no items (reel may be gone)")
+    posts = _videos_in_media(items[0])
+    if not posts:
+        raise RuntimeError("no downloadable video in media")
+    return posts[0].video_url
 
 
 def iter_saved(loader, username: str, limit: int | None = None) -> Iterator[FetchedPost]:

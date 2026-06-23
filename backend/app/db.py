@@ -22,8 +22,11 @@ CREATE TABLE IF NOT EXISTS clips (
     title        TEXT,                     -- user annotation: short title
     description  TEXT,                     -- user annotation: longer notes
     collection   TEXT,                     -- Instagram saved-collection name
-    filename     TEXT NOT NULL,            -- basename on disk
+    filename     TEXT NOT NULL,            -- basename on disk (planned, even if not downloaded)
     rel_path     TEXT NOT NULL,            -- path relative to DATA_DIR
+    media_id     TEXT,                     -- Instagram media pk, to re-fetch fresh URLs
+    has_video    INTEGER DEFAULT 0,        -- 1 = video file present on disk
+    kept         INTEGER DEFAULT 0,        -- 1 = persist (never auto-clean)
     width        INTEGER,
     height       INTEGER,
     duration     REAL,                     -- seconds
@@ -85,9 +88,18 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns introduced after the first schema, for pre-existing dbs."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(clips)")}
-    for name in ("title", "description", "collection"):
+    for name in ("title", "description", "collection", "media_id"):
         if name not in cols:
             conn.execute(f"ALTER TABLE clips ADD COLUMN {name} TEXT")
+    # Metadata-first model: a clip may be indexed (thumbnail + metadata only) with
+    # the video downloaded lazily. has_video=1 means the file is on disk; kept=1
+    # means the user wants it to persist (never auto-cleaned).
+    if "has_video" not in cols:
+        conn.execute("ALTER TABLE clips ADD COLUMN has_video INTEGER DEFAULT 0")
+        conn.execute("UPDATE clips SET has_video = 1")  # existing rows have files
+    if "kept" not in cols:
+        conn.execute("ALTER TABLE clips ADD COLUMN kept INTEGER DEFAULT 0")
+        conn.execute("UPDATE clips SET kept = 1")  # existing downloads are kept
 
 
 def init_db() -> None:

@@ -8,6 +8,9 @@ import { api, fileUrl } from "./api.js";
 export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }) {
   const videoRef = useRef(null);
 
+  const [hasVideo, setHasVideo] = useState(!!clip.has_video);
+  const [kept, setKept] = useState(!!clip.kept);
+  const [downloading, setDownloading] = useState(false);
   const [title, setTitle] = useState(clip.title || "");
   const [description, setDescription] = useState(clip.description || "");
   const [tags, setTags] = useState(clip.tags);
@@ -45,6 +48,27 @@ export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }
       setBusy(false);
     }
   };
+
+  const download = async () => {
+    setDownloading(true);
+    setNote(null);
+    try {
+      await api.ensure(clip.id);
+      setHasVideo(true);
+      await onChanged();
+    } catch (e) {
+      setNote(e.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const toggleKeep = guard(async () => {
+    const next = !kept;
+    await api.keep(clip.id, next);
+    setKept(next);
+    await onChanged();
+  });
 
   const saveMeta = guard(async () => {
     await api.updateMeta(clip.id, { title, description });
@@ -124,10 +148,25 @@ export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }
         <button className="close" onClick={onClose}>
           ×
         </button>
-        <video ref={videoRef} src={fileUrl(clip.id)} controls autoPlay />
+        {hasVideo ? (
+          <video ref={videoRef} src={fileUrl(clip.id)} controls autoPlay />
+        ) : (
+          <div className="not-downloaded">
+            <div className="nd-icon">⤓</div>
+            <p>This reel is indexed but not downloaded yet.</p>
+            <button className="primary" onClick={download} disabled={downloading}>
+              {downloading ? "Downloading…" : "Download to play & edit"}
+            </button>
+          </div>
+        )}
         <div className="dims">
-          {clip.width}×{clip.height} · {clip.duration?.toFixed(1)}s ·{" "}
-          {clip.fps?.toFixed(0)}fps · {clip.source}
+          {clip.width ? `${clip.width}×${clip.height} · ` : ""}
+          {clip.duration ? `${clip.duration.toFixed(1)}s · ` : ""}
+          {clip.source}
+          {" · "}
+          <button className="keep-toggle" onClick={toggleKeep} disabled={busy}>
+            {kept ? "★ saved" : "☆ keep"}
+          </button>
         </div>
 
         <section>

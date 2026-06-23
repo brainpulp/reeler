@@ -25,8 +25,9 @@ def register_clip(
     ig_owner: str | None = None,
     caption: str | None = None,
     op: dict | None = None,
+    kept: int = 0,
 ) -> int:
-    """Probe + thumbnail a file already on disk and insert a clip row."""
+    """Probe + thumbnail a real file already on disk and insert a clip row."""
     info = media.probe(path)
     try:
         thumb = media.make_thumbnail(path)
@@ -36,34 +37,103 @@ def register_clip(
 
     values = (
         source, ig_shortcode, ig_owner, caption, path.name, _rel(path),
-        info.width, info.height, info.duration, info.fps, thumb_rel,
+        1, kept, info.width, info.height, info.duration, info.fps, thumb_rel,
         json.dumps(op) if op else None,
     )
     cols = (
         "(source, ig_shortcode, ig_owner, caption, filename, rel_path, "
-        "width, height, duration, fps, thumb_rel, op)"
+        "has_video, kept, width, height, duration, fps, thumb_rel, op)"
     )
+    ph = "?,?,?,?,?,?,?,?,?,?,?,?,?,?"
     if ig_shortcode is None:
-        # Uploads and derived clips have no shortcode: plain insert.
-        cur = conn.execute(
-            f"INSERT INTO clips {cols} VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values
-        )
+        cur = conn.execute(f"INSERT INTO clips {cols} VALUES ({ph})", values)
         return cur.lastrowid
 
-    # Instagram clips: re-ingesting the same shortcode refreshes its caption.
-    # The conflict target must name the partial unique index's predicate.
+    # Instagram clips: re-registering the same shortcode upgrades it to a real
+    # file (e.g. an indexed reel that's now been downloaded).
     conn.execute(
         f"""
-        INSERT INTO clips {cols} VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO clips {cols} VALUES ({ph})
         ON CONFLICT(ig_shortcode) WHERE ig_shortcode IS NOT NULL
-        DO UPDATE SET caption = excluded.caption
+        DO UPDATE SET caption = COALESCE(NULLIF(excluded.caption,''), caption),
+                      filename = excluded.filename, rel_path = excluded.rel_path,
+                      has_video = 1, width = excluded.width, height = excluded.height,
+                      duration = excluded.duration, fps = excluded.fps,
+                      thumb_rel = COALESCE(excluded.thumb_rel, thumb_rel)
         """,
         values,
     )
-    row = conn.execute(
+    return conn.execute(
         "SELECT id FROM clips WHERE ig_shortcode = ?", (ig_shortcode,)
-    ).fetchone()
-    return row["id"]
+    ).fetchone()["id"]
+
+
+def register_indexed(
+    conn: sqlite3.Connection, *, shortcode: str, media_id: str,
+    owner: str | None, caption: str | None, thumb_rel: str | None,
+    planned_rel: str,
+) -> int:
+    """Insert/refresh a metadata-only catalog entry (no video downloaded)."""
+    conn.execute(
+        """
+        INSERT INTO clips
+            (source, ig_shortcode, ig_owner, caption, filename, rel_path,
+             media_id, has_video, kept, thumb_rel)
+        VALUES ('instagram', ?, ?, ?, ?, ?, ?, 0, 0, ?)
+        ON CONFLICT(ig_shortcode) WHERE ig_shortcode IS NOT NULL
+        DO UPDATE SET media_id = excluded.media_id,
+                      ig_owner = COALESCE(NULLIF(excluded.ig_owner,''), ig_owner),
+                      caption  = COALESCE(NULLIF(excluded.caption,''), caption),
+                      thumb_rel = COALESCE(excluded.thumb_rel, thumb_rel)
+        """,
+        (shortcode, owner, caption, f"{shortcode}.mp4", planned_rel,
+         media_id, thumb_rel),
+    )
+    return conn.execute(
+        "SELECT id FROM clips WHERE ig_shortcode = ?", (shortcode,)
+    ).fetchone()["id"]
+
+
+def mark_video_downloaded(conn: sqlite3.Connection, clip_id: int, path: Path) -> None:
+    """After a lazy download, probe the file and flip has_video on."""
+    info = media.probe(path)
+    try:
+        thumb_rel = _rel(media.make_thumbnail(path))
+    except media.MediaError:
+        thumb_rel = None
+    conn.execute(
+        """
+        UPDATE clips SET rel_path=?, filename=?, has_video=1,
+               width=?, height=?, duration=?, fps=?,
+               thumb_rel=COALESCE(?, thumb_rel)
+         WHERE id=?
+        """,
+        (_rel(path), path.name, info.width, info.height, info.duration,
+         info.fps, thumb_rel, clip_id),
+    )
+
+
+def set_kept(conn: sqlite3.Connection, clip_id: int, kept: int) -> None:
+    conn.execute("UPDATE clips SET kept=? WHERE id=?", (kept, clip_id))
+
+
+def clean_working_copies(conn: sqlite3.Connection) -> int:
+    """Delete downloaded videos that aren't kept (temporary working copies)."""
+    rows = conn.execute(
+        "SELECT id, rel_path FROM clips "
+        "WHERE has_video=1 AND kept=0 AND source='instagram'"
+    ).fetchall()
+    n = 0
+    for r in rows:
+        p = config.DATA_DIR / r["rel_path"]
+        try:
+            if p.exists():
+                p.unlink()
+            conn.execute("UPDATE clips SET has_video=0 WHERE id=?", (r["id"],))
+            n += 1
+        except OSError:
+            continue
+    return n
 
 
 def get_clip(conn: sqlite3.Connection, clip_id: int) -> sqlite3.Row | None:

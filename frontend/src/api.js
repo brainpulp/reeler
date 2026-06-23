@@ -30,6 +30,13 @@ export const api = {
   scanProgress: () => req("/library/scan/progress"),
   backfillCollections: () => req("/collections/backfill", { method: "POST", body: "{}" }),
   collectionsProgress: () => req("/collections/backfill/progress"),
+  startIndex: () => req("/index/start", { method: "POST", body: "{}" }),
+  stopIndex: () => req("/index/stop", { method: "POST", body: "{}" }),
+  indexProgress: () => req("/index/progress"),
+  ensure: (id) => req(`/clips/${id}/ensure`, { method: "POST", body: "{}" }),
+  keep: (id, keep = true) =>
+    req(`/clips/${id}/keep?keep=${keep}`, { method: "POST", body: "{}" }),
+  cleanLibrary: () => req("/library/clean", { method: "POST", body: "{}" }),
   upload: async (file) => {
     const fd = new FormData();
     fd.append("file", file);

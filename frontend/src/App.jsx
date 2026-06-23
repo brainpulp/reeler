@@ -20,6 +20,7 @@ export default function App() {
   const [sniff, setSniff] = useState(null); // background sniff progress
   const [scan, setScan] = useState(null); // background library-scan progress
   const [backfill, setBackfill] = useState(null); // collection backfill progress
+  const [index, setIndex] = useState(null); // metadata-index progress
   const pollRef = useRef(null);
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
@@ -61,16 +62,18 @@ export default function App() {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        const [sp, scp, bf] = await Promise.all([
+        const [sp, scp, bf, ix] = await Promise.all([
           api.sniffProgress(),
           api.scanProgress(),
           api.collectionsProgress(),
+          api.indexProgress(),
         ]);
         setSniff(sp);
         setScan(scp);
         setBackfill(bf);
+        setIndex(ix);
         await refresh();
-        if (!sp.running && !scp.running && !bf.running) {
+        if (!sp.running && !scp.running && !bf.running && !ix.running) {
           clearInterval(pollRef.current);
           pollRef.current = null;
           if (sp.done) {
@@ -89,6 +92,12 @@ export default function App() {
               bf.error
                 ? `Backfill stopped: ${bf.error}`
                 : `Organized ${bf.added} reels into collections`
+            );
+          } else if (ix.done) {
+            setInfo(
+              ix.error
+                ? `Index stopped: ${ix.error}`
+                : `${ix.capped ? "Indexed a batch" : "Index done"} — ${ix.added} reels catalogued${ix.capped ? " (run again for more)" : ""}`
             );
           }
         }
@@ -129,6 +138,23 @@ export default function App() {
     }
   };
 
+  const onIndex = async () => {
+    setError(null);
+    try {
+      const p = await api.startIndex();
+      setIndex(p);
+      startPolling();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const onClean = () =>
+    run(async () => {
+      const r = await api.cleanLibrary();
+      setInfo(`Freed ${r.freed} temporary working file${r.freed === 1 ? "" : "s"}`);
+    });
+
   // On load, reconnect to any job already running (sniff crawl or the
   // startup library scan) so the grid fills in live.
   useEffect(() => {
@@ -136,12 +162,14 @@ export default function App() {
       api.sniffProgress(),
       api.scanProgress(),
       api.collectionsProgress(),
+      api.indexProgress(),
     ])
-      .then(([sp, scp, bf]) => {
+      .then(([sp, scp, bf, ix]) => {
         setSniff(sp);
         setScan(scp);
         setBackfill(bf);
-        if (sp.running || scp.running || bf.running) startPolling();
+        setIndex(ix);
+        if (sp.running || scp.running || bf.running || ix.running) startPolling();
       })
       .catch(() => {});
     return () => pollRef.current && clearInterval(pollRef.current);
@@ -206,6 +234,17 @@ export default function App() {
                 Sniff saved reels
               </button>
             )}
+            {index && index.running ? (
+              <span className="sniff-progress">cataloguing… {index.added}</span>
+            ) : (
+              <button
+                onClick={onIndex}
+                disabled={!(ig && ig.connected)}
+                title="Catalog saved reels (metadata + thumbnails only, no videos)"
+              >
+                Index saved reels
+              </button>
+            )}
             {backfill && backfill.running ? (
               <span className="sniff-progress">
                 organizing… {backfill.added} sorted
@@ -214,11 +253,14 @@ export default function App() {
               <button
                 onClick={onBackfill}
                 disabled={!(ig && ig.connected)}
-                title="Map your Instagram collections onto downloaded reels (no re-downloads)"
+                title="Map your Instagram collections onto reels (no re-downloads)"
               >
                 Organize by collection
               </button>
             )}
+            <button onClick={onClean} disabled={busy} title="Delete temporary working videos (keeps saved + exports)">
+              Free space
+            </button>
           </span>
           <label className="upload-btn">
             Import file
@@ -298,12 +340,20 @@ export default function App() {
               <div className="thumb" onClick={() => setOpen(c)}>
                 {c.thumb_rel ? (
                   <img src={thumbUrl(c.id)} alt="" loading="lazy" />
-                ) : (
+                ) : c.has_video ? (
                   <video src={fileUrl(c.id)} muted />
+                ) : (
+                  <div className="noimg">▶</div>
                 )}
-                <span className="dur">
-                  {c.duration ? `${c.duration.toFixed(1)}s` : ""}
-                </span>
+                {c.duration ? (
+                  <span className="dur">{c.duration.toFixed(1)}s</span>
+                ) : null}
+                {!c.has_video && (
+                  <span className="badge-indexed" title="indexed — not downloaded">
+                    ⤓
+                  </span>
+                )}
+                {c.kept ? <span className="badge-kept" title="saved">★</span> : null}
               </div>
               <CardCaption clip={c} onChanged={refresh} />
               <div className="meta">

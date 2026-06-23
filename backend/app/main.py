@@ -147,6 +147,79 @@ def sniff_progress() -> dict:
     return jobs.sniff_job.status()
 
 
+@app.post("/api/index/start")
+def index_start(req: IngestRequest) -> dict:
+    """Metadata-first catalog pull (thumbnails + metadata, no videos)."""
+    if not (config.IG_COOKIE_FILE or req.cookie_file):
+        raise HTTPException(400, "no Instagram cookie configured")
+    started = jobs.index_job.start(jobs.index_worker, req.cookie_file, req.username)
+    if not started:
+        raise HTTPException(409, "an index run is already going")
+    return jobs.index_job.status()
+
+
+@app.get("/api/index/progress")
+def index_progress() -> dict:
+    return jobs.index_job.status()
+
+
+@app.post("/api/index/stop")
+def index_stop() -> dict:
+    jobs.index_job.stop()
+    return jobs.index_job.status()
+
+
+def _ensure_video(conn, loader, row) -> Path:
+    """Make sure a clip's video is on disk, lazily downloading it if needed."""
+    if row["has_video"]:
+        return repo.clip_path(row)
+    if not row["media_id"]:
+        raise HTTPException(409, "this reel has no media id to download")
+    url = instagram.fetch_fresh_video_url(loader, row["media_id"])
+    post = instagram.FetchedPost(
+        shortcode=row["ig_shortcode"], owner="", caption="", video_url=url
+    )
+    path = instagram.download_video(loader, post, config.LIBRARY_DIR)
+    repo.mark_video_downloaded(conn, row["id"], path)
+    return path
+
+
+@app.post("/api/clips/{clip_id}/ensure")
+def ensure_clip(clip_id: int) -> dict:
+    """Download this reel's video on demand (for playback/editing)."""
+    with db.get_conn() as conn:
+        row = repo.get_clip(conn, clip_id)
+        if not row:
+            raise HTTPException(404, "clip not found")
+        if not row["has_video"]:
+            try:
+                loader, _ = instagram.build_session()
+            except RuntimeError as exc:
+                raise HTTPException(400, str(exc))
+            try:
+                _ensure_video(conn, loader, row)
+            except RuntimeError as exc:
+                raise HTTPException(502, str(exc))
+        return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+@app.post("/api/clips/{clip_id}/keep")
+def keep_clip(clip_id: int, keep: bool = True) -> dict:
+    with db.get_conn() as conn:
+        if not repo.get_clip(conn, clip_id):
+            raise HTTPException(404, "clip not found")
+        repo.set_kept(conn, clip_id, 1 if keep else 0)
+        return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+@app.post("/api/library/clean")
+def library_clean() -> dict:
+    """Delete temporary working copies (downloaded but not kept)."""
+    with db.get_conn() as conn:
+        freed = repo.clean_working_copies(conn)
+    return {"freed": freed}
+
+
 @app.post("/api/collections/backfill")
 def collections_backfill(req: IngestRequest) -> dict:
     """Map Instagram collections onto local clips (metadata only, no downloads)."""
@@ -185,7 +258,7 @@ async def upload(file: UploadFile = File(...)) -> dict:
     with dest.open("wb") as fh:
         fh.write(await file.read())
     with db.get_conn() as conn:
-        clip_id = repo.register_clip(conn, path=dest, source="upload")
+        clip_id = repo.register_clip(conn, path=dest, source="upload", kept=1)
         clip = repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
     return clip
 
@@ -216,6 +289,9 @@ def clip_file(clip_id: int) -> FileResponse:
         row = repo.get_clip(conn, clip_id)
         if not row:
             raise HTTPException(404, "clip not found")
+        if not row["has_video"]:
+            # Indexed reel: the caller must POST /ensure first to download it.
+            raise HTTPException(409, "video not downloaded yet")
         return FileResponse(repo.clip_path(row), media_type="video/mp4")
 
 
@@ -291,7 +367,7 @@ def render_timeline(req: TimelineRequest) -> dict:
                 if not row:
                     raise HTTPException(404, f"clip {it.clip_id} not found")
                 resolved.append({
-                    "kind": "segment", "path": repo.clip_path(row),
+                    "kind": "segment", "path": _resolve_video(conn, row),
                     "start": it.start, "end": it.end,
                 })
             elif it.kind == "card":
@@ -306,24 +382,39 @@ def render_timeline(req: TimelineRequest) -> dict:
         except media.MediaError as exc:
             raise HTTPException(400, str(exc))
         op = {"type": "timeline", "items": [i.model_dump() for i in req.items]}
-        new_id = repo.register_clip(conn, path=out, source="derived", op=op)
+        new_id = repo.register_clip(conn, path=out, source="derived", op=op, kept=1)
         if req.title:
             repo.update_metadata(conn, new_id, {"title": req.title})
         return repo._clip_to_dict(conn, repo.get_clip(conn, new_id))
 
 
 # ----------------------------------------------- edit / manipulate -----------
+def _resolve_video(conn, row) -> Path:
+    """Return a clip's local video path, lazily downloading it if it's indexed."""
+    if row["has_video"]:
+        return repo.clip_path(row)
+    try:
+        loader, _ = instagram.build_session()
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+    try:
+        return _ensure_video(conn, loader, row)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
 def _derive(clip_id: int, op_name: str, run, op_meta: dict) -> dict:
     with db.get_conn() as conn:
         row = repo.get_clip(conn, clip_id)
         if not row:
             raise HTTPException(404, "clip not found")
+        src = _resolve_video(conn, row)
         try:
-            out = run(repo.clip_path(row))
+            out = run(src)
         except media.MediaError as exc:
             raise HTTPException(400, str(exc))
         new_id = repo.register_clip(
-            conn, path=out, source="derived",
+            conn, path=out, source="derived", kept=1,  # outputs persist by default
             op={"type": op_name, "parent": clip_id, **op_meta},
         )
         return repo._clip_to_dict(conn, repo.get_clip(conn, new_id))
@@ -372,13 +463,13 @@ def combine(req: CombineRequest) -> dict:
             row = repo.get_clip(conn, cid)
             if not row:
                 raise HTTPException(404, f"clip {cid} not found")
-            paths.append(repo.clip_path(row))
+            paths.append(_resolve_video(conn, row))
         try:
             out = media.concat(paths)
         except media.MediaError as exc:
             raise HTTPException(400, str(exc))
         new_id = repo.register_clip(
-            conn, path=out, source="derived",
+            conn, path=out, source="derived", kept=1,
             op={"type": "concat", "parents": req.clip_ids},
         )
         return repo._clip_to_dict(conn, repo.get_clip(conn, new_id))
