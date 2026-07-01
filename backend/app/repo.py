@@ -173,6 +173,24 @@ def list_clips(
     return [_clip_to_dict(conn, r) for r in rows]
 
 
+def cloud_backup(conn: sqlite3.Connection) -> dict:
+    """Build the cloud organizer's Restore/Sync payload: every Instagram reel
+    with its collection + tags (shortcodes only — no files)."""
+    reels: dict[str, dict] = {}
+    for r in conn.execute(
+        "SELECT id, ig_shortcode, collection FROM clips "
+        "WHERE ig_shortcode IS NOT NULL AND source='instagram'"
+    ).fetchall():
+        tags = [t["name"] for t in conn.execute(
+            "SELECT t.name FROM tags t JOIN clip_tags ct ON ct.tag_id=t.id "
+            "WHERE ct.clip_id=? ORDER BY t.name", (r["id"],)).fetchall()]
+        reels[r["ig_shortcode"]] = {
+            "code": r["ig_shortcode"], "tags": tags,
+            "collection": r["collection"], "note": "",
+        }
+    return {"reels": reels}
+
+
 def all_collections(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         "SELECT DISTINCT collection FROM clips "

@@ -261,6 +261,14 @@ export default function App() {
             <button onClick={onClean} disabled={busy} title="Delete temporary working videos (keeps saved + exports)">
               Free space
             </button>
+            <a
+              className="upload-btn"
+              href="/api/export/cloud"
+              download="reeler-cloud-backup.json"
+              title="Download a file to Import/Sync into the cloud app"
+            >
+              Export for cloud
+            </a>
           </span>
           <label className="upload-btn">
             Import file

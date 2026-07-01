@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -210,6 +210,17 @@ def keep_clip(clip_id: int, keep: bool = True) -> dict:
             raise HTTPException(404, "clip not found")
         repo.set_kept(conn, clip_id, 1 if keep else 0)
         return repo._clip_to_dict(conn, repo.get_clip(conn, clip_id))
+
+
+@app.get("/api/export/cloud")
+def export_cloud() -> JSONResponse:
+    """Download a reeler-cloud-backup.json for the cloud organizer (one click)."""
+    with db.get_conn() as conn:
+        data = repo.cloud_backup(conn)
+    return JSONResponse(
+        data,
+        headers={"Content-Disposition": "attachment; filename=reeler-cloud-backup.json"},
+    )
 
 
 @app.post("/api/library/clean")
