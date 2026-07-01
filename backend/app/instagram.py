@@ -211,27 +211,35 @@ _COLLECTION_FEED = "https://www.instagram.com/api/v1/feed/collection/{cid}/posts
 def list_collections(loader) -> list[dict]:
     """Return the account's named saved-collections: [{id, name}, ...].
 
-    Skips the auto 'All Posts' collection (everything is already in the flat
-    saved feed); only user-named collections are useful for grouping.
+    Paginated — Instagram returns collections a page at a time, so a single
+    request misses collections beyond the first page. Skips the auto 'All Posts'
+    collection (everything is already in the flat saved feed).
     """
     session = loader.context._session
     headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
-    params = {"collection_types": '["MEDIA"]'}
-    resp = session.get(_COLLECTIONS_URL, params=params, headers=headers, timeout=20)
-    if resp.status_code != 200:
-        raise RuntimeError(f"collections list failed (HTTP {resp.status_code})")
-    try:
-        data = resp.json()
-    except ValueError:
-        raise RuntimeError("collections list did not return JSON (session/rate-limit)")
-    out = []
-    for item in data.get("items", []):
-        if item.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
-            continue
-        cid = item.get("collection_id")
-        name = item.get("collection_name")
-        if cid and name:
-            out.append({"id": str(cid), "name": name})
+    params: dict = {"collection_types": '["MEDIA"]'}
+    out: list[dict] = []
+    seen_ids: set[str] = set()
+    while True:
+        resp = session.get(_COLLECTIONS_URL, params=params, headers=headers, timeout=20)
+        if resp.status_code != 200:
+            raise RuntimeError(f"collections list failed (HTTP {resp.status_code})")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError("collections list did not return JSON (session/rate-limit)")
+        for item in data.get("items", []):
+            if item.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
+                continue
+            cid = item.get("collection_id")
+            name = item.get("collection_name")
+            if cid and name and str(cid) not in seen_ids:
+                seen_ids.add(str(cid))
+                out.append({"id": str(cid), "name": name})
+        if not data.get("more_available") or not data.get("next_max_id"):
+            break
+        params["max_id"] = data["next_max_id"]
+        time.sleep(1.0)
     return out
 
 
