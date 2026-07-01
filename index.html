@@ -55,6 +55,7 @@
 
 <div class="bar" id="collbar"></div>
 <div class="bar" id="tagbar"></div>
+<div class="bar" id="bulkbar" hidden></div>
 
 <main>
   <div id="grid" class="grid"></div>
@@ -88,6 +89,7 @@
 const KEY = "reeler-cloud-v1";
 let state = load();
 let filter = { q:"", tag:null, coll:null };
+let selected = new Set();  // codes checked for bulk actions
 
 function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {reels:{}} }catch{ return {reels:{}} } }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -146,6 +148,32 @@ function renderBars(){
   tb.hidden = tags.length===0;
 }
 
+function renderBulk(){
+  const bar=document.getElementById("bulkbar");
+  if(selected.size===0){ bar.hidden=true; bar.innerHTML=""; return; }
+  bar.hidden=false; bar.innerHTML="";
+  const label=document.createElement("b"); label.textContent=`${selected.size} selected → move to`;
+  const sel=document.createElement("select");
+  sel.append(new Option("— pick collection —",""));
+  collections().forEach(c=>sel.append(new Option(c,c)));
+  sel.append(new Option("＋ new collection…","__new"));
+  const go=document.createElement("button"); go.className="primary"; go.textContent="Move";
+  go.onclick=()=>{
+    let v=sel.value;
+    if(v==="__new") v=prompt("New collection name:")||"";
+    if(v===""){ alert("Pick a collection first"); return; }
+    selected.forEach(code=>{ if(state.reels[code]) state.reels[code].collection=v; });
+    selected.clear(); save(); render();
+  };
+  const none=document.createElement("button"); none.textContent="Remove from collection";
+  none.onclick=()=>{ selected.forEach(code=>{ if(state.reels[code]) state.reels[code].collection=null; }); selected.clear(); save(); render(); };
+  const all=document.createElement("button"); all.textContent="Select all shown";
+  all.onclick=()=>{ Object.values(state.reels).filter(matches).forEach(r=>selected.add(r.code)); render(); };
+  const clr=document.createElement("button"); clr.textContent="Clear";
+  clr.onclick=()=>{ selected.clear(); render(); };
+  bar.append(label, sel, go, none, all, clr);
+}
+
 const io = new IntersectionObserver((entries)=>{
   for(const e of entries){ if(e.isIntersecting){ loadEmbed(e.target); io.unobserve(e.target); } }
 },{rootMargin:"400px"});
@@ -169,6 +197,9 @@ function card(r){
   const meta=document.createElement("div"); meta.className="meta";
   // collection
   const collRow=document.createElement("div"); collRow.className="row";
+  const chk=document.createElement("input"); chk.type="checkbox"; chk.title="select for bulk move"; chk.checked=selected.has(r.code);
+  chk.onchange=()=>{ chk.checked?selected.add(r.code):selected.delete(r.code); renderBulk(); };
+  collRow.append(chk);
   const sel=document.createElement("select");
   sel.append(new Option("— no collection —",""));
   collections().forEach(c=>sel.append(new Option(c,c)));
@@ -203,6 +234,7 @@ function card(r){
 
 function render(){
   renderBars();
+  renderBulk();
   const grid=document.getElementById("grid"); grid.innerHTML="";
   const list=Object.values(state.reels).filter(matches);
   document.getElementById("count").textContent = `${Object.keys(state.reels).length} reels`;
