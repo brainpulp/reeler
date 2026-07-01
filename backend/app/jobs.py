@@ -158,18 +158,26 @@ def collections_worker(job: Job, cookie_file, username) -> None:
             if job.cancelled():
                 job.state["stopped"] = True
                 break
+            planned = lambda sc: str(
+                (config.LIBRARY_DIR / f"{sc}.mp4").relative_to(config.DATA_DIR)
+            )
             for post in instagram.iter_collection_posts(loader, coll["id"]):
                 if job.cancelled():
                     job.state["stopped"] = True
                     break
                 job.state["seen"] += 1
-                updated = repo.set_collection(
+                # Catalog every reel in the collection as a link (metadata only,
+                # no video download) so non-downloaded reels still show, grouped.
+                if not repo.shortcode_exists(conn, post.shortcode):
+                    repo.register_indexed(
+                        conn, shortcode=post.shortcode, media_id=post.media_id,
+                        owner=post.owner, caption=post.caption,
+                        thumb_rel=None, planned_rel=planned(post.shortcode),
+                    )
+                repo.set_collection(
                     conn, post.shortcode, coll["name"], post.owner, post.caption
                 )
-                if updated:
-                    job.state["added"] += updated  # clips assigned a collection
-                else:
-                    job.state["skipped"] += 1  # in collection but not downloaded
+                job.state["added"] += 1
                 conn.commit()
             time.sleep(1.0)  # pace between collections
 
