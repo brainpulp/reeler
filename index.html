@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reeler Cloud — organize your saved reels (links only)</title>
+<style>
+  :root{--bg:#0e0e12;--panel:#1a1a22;--line:#2a2a35;--fg:#e8e8ef;--muted:#9a9aab;--accent:#e1306c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,sans-serif}
+  header{position:sticky;top:0;z-index:5;background:#121218;border-bottom:1px solid var(--line);padding:10px 16px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  h1{font-size:20px;margin:0 8px 0 0}
+  button,.btn{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 11px;cursor:pointer;font:inherit}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent)}
+  input,select,textarea{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+  .search{flex:1;min-width:160px}
+  .muted{color:var(--muted)}
+  .bar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--line)}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer}
+  .chip.active{background:var(--accent);border-color:var(--accent)}
+  main{padding:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .embed{position:relative;width:100%;background:#000;aspect-ratio:9/16;max-height:560px}
+  .embed iframe{width:100%;height:100%;border:0;background:#000}
+  .embed .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:34px;cursor:pointer}
+  .meta{padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+  .code{font-size:11px;color:var(--muted);word-break:break-all}
+  .tags{display:flex;flex-wrap:wrap;gap:4px}
+  .tag{font-size:11px;background:#22222c;border:1px solid var(--line);border-radius:999px;padding:2px 8px;display:inline-flex;gap:4px;align-items:center}
+  .tag b{color:var(--accent);font-weight:600}
+  .tag button{padding:0 3px;border:none;background:none;color:var(--muted)}
+  .mini{padding:4px 7px;font-size:12px}
+  .empty{color:var(--muted);text-align:center;padding:80px 20px}
+  dialog{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:12px;max-width:560px;width:92%}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+  textarea{width:100%;min-height:150px;resize:vertical}
+  a{color:#8bd}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>🎬 Reeler <span class="muted" style="font-size:12px">cloud · links only</span></h1>
+    <input class="search" id="search" placeholder="search your notes / tags / shortcode…" />
+    <button id="addBtn" class="primary">+ Add reels</button>
+    <button id="exportBtn" title="Download a backup of your tags/collections">Backup</button>
+    <input type="file" id="importFile" accept=".json" hidden />
+    <button id="importBtn" title="Restore a backup">Restore</button>
+    <span class="muted" id="count"></span>
+  </div>
+</header>
+
+<div class="bar" id="collbar"></div>
+<div class="bar" id="tagbar"></div>
+
+<main>
+  <div id="grid" class="grid"></div>
+  <div id="empty" class="empty" hidden>
+    Nothing here yet. Click <b>+ Add reels</b> and paste reel links (or drop your
+    Instagram “saved_posts.json” export). Everything you organize is saved in this
+    browser — no downloads, no servers.
+  </div>
+</main>
+
+<dialog id="addDlg">
+  <form method="dialog" style="padding:16px">
+    <h3 style="margin-top:0">Add reels</h3>
+    <p class="muted" style="font-size:13px">
+      Paste reel URLs or shortcodes (one per line), e.g.
+      <code>https://www.instagram.com/reel/ABC123/</code> — or upload your
+      Instagram <b>Download Your Information</b> <code>saved_posts.json</code>.
+    </p>
+    <textarea id="addText" placeholder="https://www.instagram.com/reel/XXXX/&#10;https://www.instagram.com/p/YYYY/&#10;ZZZZ"></textarea>
+    <div class="row" style="margin-top:10px;justify-content:space-between">
+      <label class="btn">Upload saved_posts.json<input type="file" id="addFile" accept=".json,.html" hidden></label>
+      <span>
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary" id="addOk">Add</button>
+      </span>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const KEY = "reeler-cloud-v1";
+let state = load();
+let filter = { q:"", tag:null, coll:null };
+
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {reels:{}} }catch{ return {reels:{}} } }
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+
+// Pull shortcodes out of pasted text or an Instagram export.
+function extractCodes(text){
+  const codes = new Set();
+  const re = /instagram\.com\/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/g;
+  let m; while((m = re.exec(text))) codes.add(m[1]);
+  // bare shortcodes (a line that's just an id)
+  text.split(/\s+/).forEach(tok=>{ if(/^[A-Za-z0-9_-]{5,20}$/.test(tok) && !tok.includes("/")) codes.add(tok); });
+  return [...codes];
+}
+function extractFromExport(obj){
+  const codes = new Set();
+  const walk = v => {
+    if(!v) return;
+    if(typeof v === "string"){ let m; const re=/instagram\.com\/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/g; while((m=re.exec(v)))codes.add(m[1]); return; }
+    if(Array.isArray(v)) return v.forEach(walk);
+    if(typeof v === "object") return Object.values(v).forEach(walk);
+  };
+  walk(obj);
+  return [...codes];
+}
+function addCodes(codes){
+  let added=0;
+  for(const c of codes){ if(!state.reels[c]){ state.reels[c]={code:c,tags:[],collection:null,note:""}; added++; } }
+  save(); render();
+  return added;
+}
+
+function collections(){ return [...new Set(Object.values(state.reels).map(r=>r.collection).filter(Boolean))].sort(); }
+function allTags(){ return [...new Set(Object.values(state.reels).flatMap(r=>r.tags))].sort(); }
+
+function matches(r){
+  if(filter.coll && r.collection !== filter.coll) return false;
+  if(filter.tag && !r.tags.includes(filter.tag)) return false;
+  if(filter.q){ const q=filter.q.toLowerCase(); if(!(r.code.toLowerCase().includes(q)||(r.note||"").toLowerCase().includes(q)||r.tags.some(t=>t.includes(q)))) return false; }
+  return true;
+}
+
+function chip(label,active,on){ const b=document.createElement("button"); b.className="chip"+(active?" active":""); b.textContent=label; b.onclick=on; return b; }
+
+function renderBars(){
+  const cb=document.getElementById("collbar"); cb.innerHTML="";
+  const colls=collections();
+  cb.append(Object.assign(document.createElement("span"),{className:"muted",textContent:"📁",style:"margin-right:2px"}));
+  cb.append(chip("all",!filter.coll,()=>{filter.coll=null;render()}));
+  colls.forEach(c=>cb.append(chip(c,filter.coll===c,()=>{filter.coll=c;render()})));
+  cb.hidden = colls.length===0;
+  const tb=document.getElementById("tagbar"); tb.innerHTML="";
+  const tags=allTags();
+  tb.append(Object.assign(document.createElement("span"),{className:"muted",textContent:"#",style:"margin-right:2px"}));
+  tb.append(chip("all",!filter.tag,()=>{filter.tag=null;render()}));
+  tags.forEach(t=>tb.append(chip(t,filter.tag===t,()=>{filter.tag=t;render()})));
+  tb.hidden = tags.length===0;
+}
+
+const io = new IntersectionObserver((entries)=>{
+  for(const e of entries){ if(e.isIntersecting){ loadEmbed(e.target); io.unobserve(e.target); } }
+},{rootMargin:"400px"});
+
+function loadEmbed(box){
+  if(box.dataset.loaded) return; box.dataset.loaded="1";
+  const code=box.dataset.code;
+  const f=document.createElement("iframe");
+  f.src=`https://www.instagram.com/reel/${code}/embed/`;
+  f.loading="lazy"; f.allowFullscreen=true; f.scrolling="no";
+  box.querySelector(".ph")?.remove(); box.append(f);
+}
+
+function card(r){
+  const el=document.createElement("div"); el.className="card";
+  const box=document.createElement("div"); box.className="embed"; box.dataset.code=r.code;
+  const ph=document.createElement("div"); ph.className="ph"; ph.textContent="▶"; ph.title="load reel"; ph.onclick=()=>loadEmbed(box);
+  box.append(ph); io.observe(box);
+  el.append(box);
+
+  const meta=document.createElement("div"); meta.className="meta";
+  // collection
+  const collRow=document.createElement("div"); collRow.className="row";
+  const sel=document.createElement("select");
+  sel.append(new Option("— no collection —",""));
+  collections().forEach(c=>sel.append(new Option(c,c)));
+  sel.append(new Option("＋ new collection…","__new"));
+  sel.value=r.collection||"";
+  sel.onchange=()=>{ let v=sel.value; if(v==="__new"){ v=prompt("New collection name:")||""; } r.collection=v||null; save(); render(); };
+  collRow.append(sel);
+  const open=document.createElement("a"); open.href=`https://www.instagram.com/reel/${r.code}/`; open.target="_blank"; open.textContent="↗"; open.title="open on Instagram"; open.style.marginLeft="auto";
+  collRow.append(open);
+  const del=document.createElement("button"); del.className="mini"; del.textContent="✕"; del.title="remove from library"; del.onclick=()=>{ delete state.reels[r.code]; save(); render(); };
+  collRow.append(del);
+  meta.append(collRow);
+
+  // tags
+  const tags=document.createElement("div"); tags.className="tags";
+  r.tags.forEach(t=>{ const s=document.createElement("span"); s.className="tag"; s.innerHTML=`<b>#</b>${t}`; const x=document.createElement("button"); x.textContent="×"; x.onclick=()=>{ r.tags=r.tags.filter(y=>y!==t); save(); render(); }; s.append(x); tags.append(s); });
+  const add=document.createElement("input"); add.placeholder="add tag…"; add.className="mini"; add.style.width="90px";
+  add.onkeydown=e=>{ if(e.key==="Enter"&&add.value.trim()){ const t=add.value.trim().toLowerCase(); if(!r.tags.includes(t))r.tags.push(t); save(); render(); } };
+  tags.append(add);
+  meta.append(tags);
+
+  // note
+  const note=document.createElement("input"); note.placeholder="note…"; note.value=r.note||""; note.className="mini";
+  note.onchange=()=>{ r.note=note.value; save(); };
+  meta.append(note);
+
+  const code=document.createElement("div"); code.className="code"; code.textContent=r.code;
+  meta.append(code);
+  el.append(meta);
+  return el;
+}
+
+function render(){
+  renderBars();
+  const grid=document.getElementById("grid"); grid.innerHTML="";
+  const list=Object.values(state.reels).filter(matches);
+  document.getElementById("count").textContent = `${Object.keys(state.reels).length} reels`;
+  document.getElementById("empty").hidden = Object.keys(state.reels).length>0;
+  list.forEach(r=>grid.append(card(r)));
+}
+
+// wire up
+document.getElementById("search").oninput=e=>{ filter.q=e.target.value; render(); };
+const dlg=document.getElementById("addDlg");
+document.getElementById("addBtn").onclick=()=>{ document.getElementById("addText").value=""; dlg.showModal(); };
+document.getElementById("addFile").onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const txt=await f.text();
+  let codes; try{ codes=extractFromExport(JSON.parse(txt)); }catch{ codes=extractCodes(txt); }
+  const n=addCodes(codes); dlg.close(); alert(`Added ${n} reels from ${f.name}`);
+};
+document.getElementById("addOk").onclick=e=>{
+  const codes=extractCodes(document.getElementById("addText").value);
+  const n=addCodes(codes);
+  setTimeout(()=>alert(`Added ${n} reels`),50);
+};
+document.getElementById("exportBtn").onclick=()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="reeler-cloud-backup.json"; a.click();
+};
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{ const data=JSON.parse(await f.text()); if(data.reels){ state=data; save(); render(); alert("Restored backup"); } }catch{ alert("Not a valid backup file"); }
+};
+
+render();
+</script>
+</body>
+</html>
