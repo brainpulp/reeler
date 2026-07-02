@@ -45,6 +45,7 @@ class IngestRequest(BaseModel):
     limit: int = 12
     cookie_file: str | None = None
     username: str | None = None
+    pages: int | None = None   # collection-update depth per collection (None = all)
 
 
 class TagRequest(BaseModel):
@@ -236,8 +237,11 @@ def collections_backfill(req: IngestRequest) -> dict:
     """Map Instagram collections onto local clips (metadata only, no downloads)."""
     if not (config.IG_COOKIE_FILE or req.cookie_file):
         raise HTTPException(400, "no Instagram cookie configured")
+    # Default to a light 3-page-per-collection update (recent additions) so the
+    # routine app-button sync barely touches the account.
+    pages = req.pages if req.pages is not None else 3
     started = jobs.collections_job.start(
-        jobs.collections_worker, req.cookie_file, req.username
+        jobs.collections_worker, req.cookie_file, req.username, pages
     )
     if not started:
         raise HTTPException(409, "a collection backfill is already running")

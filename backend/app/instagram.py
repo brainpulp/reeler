@@ -243,12 +243,19 @@ def list_collections(loader) -> list[dict]:
     return out
 
 
-def iter_collection_posts(loader, collection_id: str) -> Iterator[FetchedPost]:
-    """Yield video posts in one collection (paginated)."""
+def iter_collection_posts(loader, collection_id: str,
+                          max_pages: int | None = None) -> Iterator[FetchedPost]:
+    """Yield video posts in one collection.
+
+    max_pages caps how deep we page. For routine *updates* pass a small number
+    (new additions sit at the top of a collection), which keeps the request
+    count tiny; pass None for a full one-time catalog.
+    """
     session = loader.context._session
     headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
     url = _COLLECTION_FEED.format(cid=collection_id)
     params: dict = {}
+    pages = 0
     while True:
         resp = session.get(url, params=params, headers=headers, timeout=20)
         if resp.status_code != 200:
@@ -261,6 +268,9 @@ def iter_collection_posts(loader, collection_id: str) -> Iterator[FetchedPost]:
             media = item.get("media") or item
             for post in _videos_in_media(media):
                 yield post
+        pages += 1
+        if max_pages and pages >= max_pages:
+            break
         if not data.get("more_available") or not data.get("next_max_id"):
             break
         params["max_id"] = data["next_max_id"]

@@ -143,12 +143,13 @@ def scan_worker(job: Job) -> None:
                 continue
 
 
-def collections_worker(job: Job, cookie_file, username) -> None:
+def collections_worker(job: Job, cookie_file, username, max_pages=None) -> None:
     """Map each saved collection's reels onto local clips — metadata only.
 
-    Fetches the account's named collections and their post lists, then sets the
-    `collection` (and backfills owner/caption) on clips we already have. Never
-    downloads a video. Paced, cancellable, and aborts on any Instagram error.
+    Fetches the account's named collections and their post lists, cataloging
+    each reel as a link and setting its collection. Never downloads a video.
+    Paced, cancellable, aborts on any Instagram error. max_pages caps depth per
+    collection for light routine updates (new reels are at the top).
     """
     loader, uname = instagram.build_session(cookie_file, username)
     job.state["username"] = uname
@@ -161,7 +162,9 @@ def collections_worker(job: Job, cookie_file, username) -> None:
             planned = lambda sc: str(
                 (config.LIBRARY_DIR / f"{sc}.mp4").relative_to(config.DATA_DIR)
             )
-            for post in instagram.iter_collection_posts(loader, coll["id"]):
+            for post in instagram.iter_collection_posts(
+                loader, coll["id"], max_pages=max_pages
+            ):
                 if job.cancelled():
                     job.state["stopped"] = True
                     break
