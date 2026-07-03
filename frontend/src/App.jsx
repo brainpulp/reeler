@@ -22,6 +22,7 @@ export default function App() {
   const [backfill, setBackfill] = useState(null); // collection backfill progress
   const [index, setIndex] = useState(null); // metadata-index progress
   const pollRef = useRef(null);
+  const exportAfterRef = useRef(false); // download the cloud file once a sync finishes
 
   const addToTimeline = (item) => setTimeline((t) => [...t, item]);
 
@@ -88,11 +89,24 @@ export default function App() {
                 : `${how} — ${sp.added} new, ${sp.skipped} already had`
             );
           } else if (bf.done) {
-            setInfo(
-              bf.error
-                ? `Backfill stopped: ${bf.error}`
-                : `Organized ${bf.added} reels into collections`
-            );
+            if (!bf.error && exportAfterRef.current) {
+              const a = document.createElement("a");
+              a.href = "/api/export/cloud";
+              a.download = "reeler-cloud-backup.json";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              setInfo(
+                `Updated ${bf.added} reels · downloaded reeler-cloud-backup.json — now click "Import / Sync" in the cloud app.`
+              );
+            } else {
+              setInfo(
+                bf.error
+                  ? `Update stopped: ${bf.error}`
+                  : `Organized ${bf.added} reels into collections`
+              );
+            }
+            exportAfterRef.current = false;
           } else if (ix.done) {
             setInfo(
               ix.error
@@ -136,6 +150,12 @@ export default function App() {
     } catch (e) {
       setError(e.message);
     }
+  };
+
+  // One click: run the light collection update, then auto-download the cloud file.
+  const onUpdateForCloud = async () => {
+    exportAfterRef.current = true;
+    await onBackfill();
   };
 
   const onIndex = async () => {
@@ -247,15 +267,16 @@ export default function App() {
             )}
             {backfill && backfill.running ? (
               <span className="sniff-progress">
-                organizing… {backfill.added} sorted
+                updating… {backfill.added} sorted
               </span>
             ) : (
               <button
-                onClick={onBackfill}
+                className="primary"
+                onClick={onUpdateForCloud}
                 disabled={!(ig && ig.connected)}
-                title="Map your Instagram collections onto reels (no re-downloads)"
+                title="Light update from Instagram (recent additions only), then download the file for the cloud app"
               >
-                Organize by collection
+                ⟳ Update for cloud
               </button>
             )}
             <button onClick={onClean} disabled={busy} title="Delete temporary working videos (keeps saved + exports)">
