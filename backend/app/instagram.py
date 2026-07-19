@@ -208,6 +208,34 @@ _COLLECTIONS_URL = "https://www.instagram.com/api/v1/collections/list/"
 _COLLECTION_FEED = "https://www.instagram.com/api/v1/feed/collection/{cid}/posts/"
 
 
+def _get_json(session, url, headers, params=None, what="request"):
+    """GET and parse JSON, with a diagnostic error that says what actually came
+    back (status + a snippet) so failures are debuggable, not just 'no JSON'."""
+    resp = session.get(url, params=params, headers=headers, timeout=20)
+    ctype = resp.headers.get("content-type", "")
+    body = resp.text or ""
+    low = body[:800].lower()
+    if resp.status_code == 200 and "json" in ctype:
+        try:
+            return resp.json()
+        except ValueError:
+            pass
+    # Build a helpful hint from what we see.
+    hint = ""
+    if resp.status_code in (301, 302) or "accounts/login" in low or '"loginform"' in low or "log in" in low:
+        hint = " — session looks logged out; re-export your cookie"
+    elif resp.status_code == 429 or "please wait" in low or "try again" in low or resp.status_code >= 500:
+        hint = " — Instagram is throttling; wait and retry"
+    elif resp.status_code == 404:
+        hint = " — endpoint not found (Instagram may have changed it)"
+    elif "checkpoint" in low or "challenge" in low:
+        hint = " — Instagram wants you to verify (checkpoint) in the app/browser"
+    snippet = " ".join(body[:160].split())
+    raise RuntimeError(
+        f"{what}: HTTP {resp.status_code}, type '{ctype or 'none'}'{hint}. Response starts: {snippet!r}"
+    )
+
+
 def list_collections(loader) -> list[dict]:
     """Return the account's named saved-collections: [{id, name}, ...].
 
@@ -221,13 +249,7 @@ def list_collections(loader) -> list[dict]:
     out: list[dict] = []
     seen_ids: set[str] = set()
     while True:
-        resp = session.get(_COLLECTIONS_URL, params=params, headers=headers, timeout=20)
-        if resp.status_code != 200:
-            raise RuntimeError(f"collections list failed (HTTP {resp.status_code})")
-        try:
-            data = resp.json()
-        except ValueError:
-            raise RuntimeError("collections list did not return JSON (session/rate-limit)")
+        data = _get_json(session, _COLLECTIONS_URL, headers, params, what="collections list")
         for item in data.get("items", []):
             if item.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
                 continue
@@ -257,13 +279,7 @@ def iter_collection_posts(loader, collection_id: str,
     params: dict = {}
     pages = 0
     while True:
-        resp = session.get(url, params=params, headers=headers, timeout=20)
-        if resp.status_code != 200:
-            raise RuntimeError(f"collection feed failed (HTTP {resp.status_code})")
-        try:
-            data = resp.json()
-        except ValueError:
-            raise RuntimeError("collection feed did not return JSON (session/rate-limit)")
+        data = _get_json(session, url, headers, params, what="collection feed")
         for item in data.get("items", []):
             media = item.get("media") or item
             for post in _videos_in_media(media):
