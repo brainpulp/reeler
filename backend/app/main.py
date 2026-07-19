@@ -106,6 +106,7 @@ class TimelineRequest(BaseModel):
 def health() -> dict:
     return {
         "ok": True,
+        "build": "feed-collections",  # bump to verify the running code is current
         "ffmpeg": bool(media),
         "ig_cookie_configured": bool(config.IG_COOKIE_FILE),
     }
