@@ -224,6 +224,55 @@ def export_cloud() -> JSONResponse:
     )
 
 
+@app.get("/api/debug/probe")
+def debug_probe() -> dict:
+    """One-shot diagnostic: show what Instagram actually returns for the saved
+    feed vs the collections endpoint, so we can fix the right thing."""
+    import re as _re
+    out: dict = {}
+    try:
+        loader, uname = instagram.build_session()
+    except Exception as exc:
+        return {"build_session_error": str(exc)}
+    out["user"] = uname
+    s = loader.context._session
+    h = instagram._api_headers()
+
+    # 1) saved feed — the one that works. Look for collection info in the media.
+    try:
+        r = s.get(instagram._SAVED_URL, headers=h, timeout=20)
+        out["saved_status"] = r.status_code
+        out["saved_ctype"] = r.headers.get("content-type", "")
+        d = r.json()
+        items = d.get("items", [])
+        out["saved_items"] = len(items)
+        if items:
+            media = items[0].get("media") or items[0]
+            out["saved_media_keys"] = sorted(media.keys())
+            out["saved_collection_fields"] = {
+                k: media[k] for k in media
+                if "collection" in k.lower() or "saved" in k.lower()
+            }
+    except Exception as exc:
+        out["saved_error"] = str(exc)[:200]
+
+    # 2) collections endpoint — the broken one. Reveal redirects + what page.
+    try:
+        rc = s.get(instagram._COLLECTIONS_URL, headers=h, timeout=20,
+                   allow_redirects=False)
+        out["coll_status"] = rc.status_code
+        out["coll_ctype"] = rc.headers.get("content-type", "")
+        out["coll_redirect_to"] = rc.headers.get("location", "")
+        m = _re.search(r"<title[^>]*>(.*?)</title>", rc.text[:3000], _re.I | _re.S)
+        out["coll_title"] = m.group(1).strip()[:120] if m else ""
+        rc2 = s.get(instagram._COLLECTIONS_URL, headers=h, timeout=20)
+        out["coll_final_url"] = rc2.url
+        out["coll_final_status"] = rc2.status_code
+    except Exception as exc:
+        out["coll_error"] = str(exc)[:200]
+    return out
+
+
 @app.post("/api/library/clean")
 def library_clean() -> dict:
     """Delete temporary working copies (downloaded but not kept)."""
