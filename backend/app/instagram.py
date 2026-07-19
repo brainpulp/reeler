@@ -11,6 +11,7 @@ REELER_IG_COOKIE_FILE at it.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from http.cookiejar import MozillaCookieJar
@@ -245,9 +246,13 @@ def _get_json(session, url, headers, params=None, what="request"):
         hint = " — endpoint not found (Instagram may have changed it)"
     elif "checkpoint" in low or "challenge" in low:
         hint = " — Instagram wants you to verify (checkpoint) in the app/browser"
-    snippet = " ".join(body[:160].split())
+    title = ""
+    m = re.search(r"<title[^>]*>(.*?)</title>", body[:2000], re.I | re.S)
+    if m:
+        title = f" title={m.group(1).strip()[:80]!r}"
+    snippet = " ".join(body[:220].split())
     raise RuntimeError(
-        f"{what}: HTTP {resp.status_code}, type '{ctype or 'none'}'{hint}. Response starts: {snippet!r}"
+        f"{what}: HTTP {resp.status_code}, type '{ctype or 'none'}'{hint}{title}. Body: {snippet!r}"
     )
 
 
@@ -260,13 +265,15 @@ def list_collections(loader) -> list[dict]:
     """
     session = loader.context._session
     headers = _api_headers()
-    params: dict = {"collection_types": '["MEDIA"]'}
+    # No collection_types filter — Instagram may reject it here now; fetch all
+    # and skip the auto collections in code.
+    params: dict = {}
     out: list[dict] = []
     seen_ids: set[str] = set()
     while True:
         data = _get_json(session, _COLLECTIONS_URL, headers, params, what="collections list")
         for item in data.get("items", []):
-            if item.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
+            if item.get("collection_type", "").endswith("AUTO_COLLECTION"):
                 continue
             cid = item.get("collection_id")
             name = item.get("collection_name")
