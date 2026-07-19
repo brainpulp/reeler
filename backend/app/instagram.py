@@ -100,6 +100,21 @@ _IG_APP_ID = "936619743392459"
 _SAVED_URL = "https://www.instagram.com/api/v1/feed/saved/posts/"
 
 
+def _api_headers() -> dict:
+    """Headers that make Instagram treat a request as a background API/XHR call
+    and return JSON — without these it serves the HTML web page instead."""
+    return {
+        "X-IG-App-ID": _IG_APP_ID,
+        "X-Requested-With": "XMLHttpRequest",
+        "X-ASBD-ID": "129477",
+        "Accept": "*/*",
+        "Referer": "https://www.instagram.com/",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+    }
+
+
 def _videos_in_media(media: dict) -> list[FetchedPost]:
     """Extract downloadable video posts from one saved media item.
 
@@ -148,7 +163,7 @@ def fetch_fresh_video_url(loader, media_id: str) -> str:
     before it can be downloaded. Uses the media-info endpoint.
     """
     session = loader.context._session
-    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    headers = _api_headers()
     url = f"https://www.instagram.com/api/v1/media/{media_id}/info/"
     resp = session.get(url, headers=headers, timeout=20)
     if resp.status_code != 200:
@@ -174,7 +189,7 @@ def iter_saved(loader, username: str, limit: int | None = None) -> Iterator[Fetc
     itself uses, reusing the authenticated session.
     """
     session = loader.context._session
-    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    headers = _api_headers()
     params: dict = {}
     count = 0
     while True:
@@ -244,7 +259,7 @@ def list_collections(loader) -> list[dict]:
     collection (everything is already in the flat saved feed).
     """
     session = loader.context._session
-    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    headers = _api_headers()
     params: dict = {"collection_types": '["MEDIA"]'}
     out: list[dict] = []
     seen_ids: set[str] = set()
@@ -274,7 +289,7 @@ def iter_collection_posts(loader, collection_id: str,
     count tiny; pass None for a full one-time catalog.
     """
     session = loader.context._session
-    headers = {"X-IG-App-ID": _IG_APP_ID, "Referer": "https://www.instagram.com/"}
+    headers = _api_headers()
     url = _COLLECTION_FEED.format(cid=collection_id)
     params: dict = {}
     pages = 0
