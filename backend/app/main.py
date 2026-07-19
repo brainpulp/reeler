@@ -104,9 +104,20 @@ class TimelineRequest(BaseModel):
 # ---------------------------------------------------------------- health -----
 @app.get("/api/health")
 def health() -> dict:
+    # How many reels have a stored cover URL — proves the thumbnail code ran and
+    # a fresh Update populated it. 0 here = old backend or no Update yet.
+    try:
+        with db.get_conn() as conn:
+            thumbs_ready = conn.execute(
+                "SELECT COUNT(*) AS n FROM clips "
+                "WHERE thumb_url IS NOT NULL AND thumb_url <> ''"
+            ).fetchone()["n"]
+    except Exception:
+        thumbs_ready = None
     return {
         "ok": True,
-        "build": "feed-collections",  # bump to verify the running code is current
+        "build": "thumbs",  # bump to verify the running code is current
+        "thumbs_ready": thumbs_ready,
         "ffmpeg": bool(media),
         "ig_cookie_configured": bool(config.IG_COOKIE_FILE),
     }
