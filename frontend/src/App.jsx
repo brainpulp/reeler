@@ -4,6 +4,10 @@ import ClipDetail from "./ClipDetail.jsx";
 import Timeline from "./Timeline.jsx";
 import CardCaption from "./CardCaption.jsx";
 
+// The links-only cloud organizer (GitHub Pages). "Update for cloud" opens it
+// automatically after writing the backup so syncing is one press, not two apps.
+const CLOUD_URL = "https://brainpulp.github.io/reeler/";
+
 export default function App() {
   const [clips, setClips] = useState([]);
   const [tags, setTags] = useState([]);
@@ -17,6 +21,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ig, setIg] = useState(null); // instagram connection status
   const [info, setInfo] = useState(null); // transient success message
+  const [cloudReady, setCloudReady] = useState(false); // show cloud link in banner
   const [sniff, setSniff] = useState(null); // background sniff progress
   const [scan, setScan] = useState(null); // background library-scan progress
   const [backfill, setBackfill] = useState(null); // collection backfill progress
@@ -96,8 +101,13 @@ export default function App() {
               document.body.appendChild(a);
               a.click();
               a.remove();
+              // Open the cloud organizer so the user just clicks Import / Sync
+              // there. Popup blockers may stop this (it's not a direct click);
+              // the banner link below is the fallback.
+              window.open(CLOUD_URL, "_blank", "noopener");
+              setCloudReady(true);
               setInfo(
-                `Updated ${bf.added} reels · downloaded reeler-cloud-backup.json — now click "Import / Sync" in the cloud app.`
+                `Updated ${bf.added} reels · saved reeler-cloud-backup.json. Opened the cloud app — click "Import / Sync" and pick that file.`
               );
             } else {
               setInfo(
@@ -307,8 +317,18 @@ export default function App() {
 
       {error && <div className="error">⚠ {error}</div>}
       {info && (
-        <div className="info-banner" onClick={() => setInfo(null)}>
-          {info}
+        <div className="info-banner">
+          <span onClick={() => setInfo(null)}>{info}</span>
+          {cloudReady && (
+            <a
+              href={CLOUD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ marginLeft: 8, fontWeight: 600 }}
+            >
+              Open cloud app ↗
+            </a>
+          )}
         </div>
       )}
 
