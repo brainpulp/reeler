@@ -191,6 +191,55 @@ def cloud_backup(conn: sqlite3.Connection) -> dict:
     return {"reels": reels}
 
 
+def set_collection_ids(conn: sqlite3.Connection, shortcode: str, ids: list) -> None:
+    """Store the Instagram saved-collection ids a reel belongs to (from the feed)."""
+    conn.execute(
+        "UPDATE clips SET collection_ids = ? WHERE ig_shortcode = ?",
+        (json.dumps(ids), shortcode),
+    )
+
+
+def collection_id_name_map(conn: sqlite3.Connection) -> dict:
+    """Learn collection_id -> name from reels that already have BOTH a name and
+    their collection ids (named in a past sync, ids from the current feed)."""
+    mapping: dict = {}
+    rows = conn.execute(
+        "SELECT collection, collection_ids FROM clips "
+        "WHERE collection IS NOT NULL AND collection <> '' AND collection_ids IS NOT NULL"
+    ).fetchall()
+    for r in rows:
+        try:
+            ids = json.loads(r["collection_ids"]) or []
+        except (TypeError, ValueError):
+            ids = []
+        for cid in ids:
+            mapping.setdefault(str(cid), r["collection"])
+    return mapping
+
+
+def apply_collection_names(conn: sqlite3.Connection, id_name: dict) -> int:
+    """Set collection name on reels that have collection ids but no name yet."""
+    if not id_name:
+        return 0
+    n = 0
+    rows = conn.execute(
+        "SELECT id, collection_ids FROM clips "
+        "WHERE (collection IS NULL OR collection = '') AND collection_ids IS NOT NULL"
+    ).fetchall()
+    for r in rows:
+        try:
+            ids = json.loads(r["collection_ids"]) or []
+        except (TypeError, ValueError):
+            ids = []
+        for cid in ids:
+            if str(cid) in id_name:
+                conn.execute("UPDATE clips SET collection = ? WHERE id = ?",
+                             (id_name[str(cid)], r["id"]))
+                n += 1
+                break
+    return n
+
+
 def all_collections(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         "SELECT DISTINCT collection FROM clips "

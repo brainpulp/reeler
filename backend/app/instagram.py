@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from typing import Iterator
@@ -29,6 +29,7 @@ class FetchedPost:
     video_url: str
     media_id: str = ""      # Instagram media pk, for re-fetching fresh URLs later
     thumb_url: str = ""     # poster image URL (for the metadata-only catalog)
+    collection_ids: list = field(default_factory=list)  # saved-collection ids the reel is in
 
 
 def _load_instaloader():
@@ -126,6 +127,8 @@ def _videos_in_media(media: dict) -> list[FetchedPost]:
     caption_obj = media.get("caption") or {}
     caption = caption_obj.get("text", "") if isinstance(caption_obj, dict) else ""
     base_code = media.get("code") or ""
+    # Which saved-collections this reel belongs to — rides along with the feed.
+    coll_ids = [str(x) for x in (media.get("saved_collection_ids") or [])]
 
     slides = media.get("carousel_media") or [media]
     out: list[FetchedPost] = []
@@ -146,6 +149,7 @@ def _videos_in_media(media: dict) -> list[FetchedPost]:
             video_url=versions[0]["url"],
             media_id=str(slide.get("pk") or slide.get("id") or media.get("pk") or ""),
             thumb_url=thumbs[0]["url"] if thumbs else "",
+            collection_ids=coll_ids,
         ))
     return out
 

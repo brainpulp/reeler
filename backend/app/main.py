@@ -286,11 +286,10 @@ def collections_backfill(req: IngestRequest) -> dict:
     """Map Instagram collections onto local clips (metadata only, no downloads)."""
     if not (config.IG_COOKIE_FILE or req.cookie_file):
         raise HTTPException(400, "no Instagram cookie configured")
-    # Default to a light 3-page-per-collection update (recent additions) so the
-    # routine app-button sync barely touches the account.
-    pages = req.pages if req.pages is not None else 3
+    # Read collections from the saved feed (the collections endpoint is blocked
+    # by Instagram now — it 302-redirects to login). Metadata only.
     started = jobs.collections_job.start(
-        jobs.collections_worker, req.cookie_file, req.username, pages
+        jobs.feed_collections_worker, req.cookie_file, req.username
     )
     if not started:
         raise HTTPException(409, "a collection backfill is already running")

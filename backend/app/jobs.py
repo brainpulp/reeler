@@ -232,6 +232,42 @@ def index_worker(job: Job, cookie_file, username,
             time.sleep(random.uniform(0.6, 1.4))
 
 
+def feed_collections_worker(job: Job, cookie_file, username, max_reels=4000) -> None:
+    """Assign collections from the SAVED FEED (which works), not the blocked
+    collections endpoint. Each reel's `saved_collection_ids` rides along with
+    the feed; we store them, then learn id->name from reels that already have a
+    name and apply names to the rest. Metadata only, paced, cancellable.
+    """
+    loader, uname = instagram.build_session(cookie_file, username)
+    job.state["username"] = uname
+    with db.get_conn() as conn:
+        for post in instagram.iter_saved(loader, uname, limit=None):
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            job.state["seen"] += 1
+            if not repo.shortcode_exists(conn, post.shortcode):
+                planned = str(
+                    (config.LIBRARY_DIR / f"{post.shortcode}.mp4").relative_to(config.DATA_DIR)
+                )
+                repo.register_indexed(
+                    conn, shortcode=post.shortcode, media_id=post.media_id,
+                    owner=post.owner, caption=post.caption,
+                    thumb_rel=None, planned_rel=planned,
+                )
+                job.state["added"] += 1
+            repo.set_collection_ids(conn, post.shortcode, post.collection_ids)
+            conn.commit()
+            if job.state["seen"] >= max_reels:
+                job.state["capped"] = True
+                break
+        # Marry collection ids to the names you already have, then label the rest.
+        id_name = repo.collection_id_name_map(conn)
+        job.state["named"] = repo.apply_collection_names(conn, id_name)
+        job.state["collections_known"] = len(set(id_name.values()))
+        conn.commit()
+
+
 # Jobs: full download sniff, local scan, collection backfill, metadata index.
 sniff_job = Job()
 scan_job = Job()
