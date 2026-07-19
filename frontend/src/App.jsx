@@ -369,6 +369,13 @@ export default function App() {
               <div className="thumb" onClick={() => setOpen(c)}>
                 {c.thumb_rel ? (
                   <img src={thumbUrl(c.id)} alt="" loading="lazy" />
+                ) : c.thumb_url ? (
+                  <img
+                    src={c.thumb_url}
+                    alt=""
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
                 ) : c.has_video ? (
                   <video src={fileUrl(c.id)} muted />
                 ) : (

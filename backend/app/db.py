@@ -88,7 +88,8 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns introduced after the first schema, for pre-existing dbs."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(clips)")}
-    for name in ("title", "description", "collection", "media_id", "collection_ids"):
+    for name in ("title", "description", "collection", "media_id",
+                 "collection_ids", "thumb_url"):
         if name not in cols:
             conn.execute(f"ALTER TABLE clips ADD COLUMN {name} TEXT")
     # Metadata-first model: a clip may be indexed (thumbnail + metadata only) with

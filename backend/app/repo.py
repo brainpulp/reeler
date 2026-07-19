@@ -191,6 +191,18 @@ def cloud_backup(conn: sqlite3.Connection) -> dict:
     return {"reels": reels}
 
 
+def set_thumb_url(conn: sqlite3.Connection, shortcode: str, url: str) -> None:
+    """Store the reel's remote cover-image URL (from the saved feed) so the grid
+    can show a thumbnail without downloading anything. Refreshed each run because
+    Instagram CDN URLs expire; skipped when empty so we never wipe a good one."""
+    if not url:
+        return
+    conn.execute(
+        "UPDATE clips SET thumb_url = ? WHERE ig_shortcode = ?",
+        (url, shortcode),
+    )
+
+
 def set_collection_ids(conn: sqlite3.Connection, shortcode: str, ids: list) -> None:
     """Store the Instagram saved-collection ids a reel belongs to (from the feed)."""
     conn.execute(

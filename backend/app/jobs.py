@@ -257,6 +257,9 @@ def feed_collections_worker(job: Job, cookie_file, username, max_reels=4000) -> 
                 )
                 job.state["added"] += 1
             repo.set_collection_ids(conn, post.shortcode, post.collection_ids)
+            # The feed already carries a cover URL — store it so indexed reels
+            # show a thumbnail in the grid without downloading anything.
+            repo.set_thumb_url(conn, post.shortcode, post.thumb_url)
             conn.commit()
             if job.state["seen"] >= max_reels:
                 job.state["capped"] = True
