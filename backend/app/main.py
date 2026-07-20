@@ -236,6 +236,20 @@ def export_cloud() -> JSONResponse:
     )
 
 
+@app.post("/api/publish")
+def publish() -> dict:
+    """Push the cloud data (+ page) to the gh-pages site so every device sees it.
+
+    Runs entirely via an isolated git worktree using this PC's own git auth —
+    no tokens, no server. Returns {ok, pushed, count} or {ok:false, error}.
+    """
+    from . import publish as _publish  # local import: git plumbing, PC-only path
+    try:
+        return _publish.publish_to_web()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.get("/api/debug/probe")
 def debug_probe() -> dict:
     """One-shot diagnostic: show what Instagram actually returns for the saved
@@ -345,6 +359,7 @@ def list_clips(tag: str | None = None, collection: str | None = None) -> dict:
         return {
             "clips": repo.list_clips(conn, tag=tag, collection=collection),
             "tags": repo.all_tags(conn),
+            "tag_counts": repo.tag_counts(conn),
             "collections": repo.all_collections(conn),
         }
 

@@ -306,7 +306,31 @@ document.getElementById("importFile").onchange=async e=>{
   alert(`Synced: ${added} new reels, ${updated} updated. Your tags & notes were kept.`);
 };
 
+// Auto-sync: on load, pull the data.json published next to this page (if any)
+// and merge it in — same rules as Import (add new reels, take Instagram's
+// collection, keep your own tags & notes). This is what makes a PC update show
+// up on every other device with nothing to import by hand.
+async function autoSync(){
+  try{
+    const res = await fetch("./data.json?t=" + Date.now(), {cache:"no-store"});
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!data || !data.reels) return;
+    for(const [code,inc] of Object.entries(data.reels)){
+      if(!state.reels[code]){
+        state.reels[code]={code, tags:inc.tags||[], collection:inc.collection||null, note:inc.note||""};
+      } else {
+        const cur=state.reels[code];
+        if(inc.collection) cur.collection=inc.collection;
+        cur.tags=[...new Set([...(cur.tags||[]), ...(inc.tags||[])])];
+      }
+    }
+    save(); render();
+  }catch{ /* no published data yet, or offline — just show local */ }
+}
+
 render();
+autoSync();
 </script>
 </body>
 </html>

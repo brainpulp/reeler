@@ -323,6 +323,19 @@ def all_tags(conn: sqlite3.Connection) -> list[str]:
     return [r["name"] for r in rows]
 
 
+def tag_counts(conn: sqlite3.Connection) -> dict:
+    """How many clips carry each tag (whole library, ignoring active filters)."""
+    rows = conn.execute(
+        """
+        SELECT t.name AS name, COUNT(ct.clip_id) AS n
+          FROM tags t
+          LEFT JOIN clip_tags ct ON ct.tag_id = t.id
+      GROUP BY t.id
+        """
+    ).fetchall()
+    return {r["name"]: r["n"] for r in rows}
+
+
 # --------------------------------------------------------------- metadata ----
 def update_metadata(conn: sqlite3.Connection, clip_id: int, fields: dict) -> None:
     """Update only the provided metadata columns (partial patch)."""

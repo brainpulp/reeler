@@ -11,6 +11,7 @@ const CLOUD_URL = "https://brainpulp.github.io/reeler/";
 export default function App() {
   const [clips, setClips] = useState([]);
   const [tags, setTags] = useState([]);
+  const [tagCounts, setTagCounts] = useState({});
   const [collections, setCollections] = useState([]);
   const [activeTag, setActiveTag] = useState(null);
   const [activeCollection, setActiveCollection] = useState(null);
@@ -35,6 +36,7 @@ export default function App() {
     const data = await api.listClips(activeTag, activeCollection);
     setClips(data.clips);
     setTags(data.tags);
+    setTagCounts(data.tag_counts || {});
     setCollections(data.collections || []);
   }, [activeTag, activeCollection]);
 
@@ -95,20 +97,39 @@ export default function App() {
             );
           } else if (bf.done) {
             if (!bf.error && exportAfterRef.current) {
-              const a = document.createElement("a");
-              a.href = "/api/export/cloud";
-              a.download = "reeler-cloud-backup.json";
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              // Open the cloud organizer so the user just clicks Import / Sync
-              // there. Popup blockers may stop this (it's not a direct click);
-              // the banner link below is the fallback.
-              window.open(CLOUD_URL, "_blank", "noopener");
-              setCloudReady(true);
-              setInfo(
-                `Updated ${bf.added} reels · saved reeler-cloud-backup.json. Opened the cloud app — click "Import / Sync" and pick that file.`
-              );
+              // Publish straight to the gh-pages site so every device (Mac,
+              // phone) shows the update automatically — no file to shuttle.
+              setInfo(`Updated ${bf.added} reels · publishing to the web…`);
+              api
+                .publish()
+                .then((res) => {
+                  if (res.ok && res.pushed) {
+                    setCloudReady(true);
+                    setInfo(
+                      `Updated ${bf.added} reels · published to the web ✓ Open it on any device — it auto-updates.`
+                    );
+                    window.open(CLOUD_URL, "_blank", "noopener");
+                  } else if (res.ok) {
+                    setCloudReady(true);
+                    setInfo(`Updated ${bf.added} reels · web already up to date.`);
+                  } else {
+                    // Auto-publish failed (e.g. no GitHub push auth on this PC):
+                    // fall back to the download + manual Import so nothing is lost.
+                    const a = document.createElement("a");
+                    a.href = "/api/export/cloud";
+                    a.download = "reeler-cloud-backup.json";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setCloudReady(true);
+                    setInfo(
+                      `Updated ${bf.added} reels · couldn't auto-publish (${res.error || "unknown"}). Downloaded the backup — Import / Sync it in the cloud app.`
+                    );
+                  }
+                })
+                .catch((e) =>
+                  setInfo(`Updated ${bf.added} reels · publish error: ${e.message}`)
+                );
             } else {
               setInfo(
                 bf.error
@@ -346,6 +367,7 @@ export default function App() {
             onClick={() => setActiveTag(t)}
           >
             #{t}
+            {tagCounts[t] != null && <span className="tag-count">{tagCounts[t]}</span>}
           </button>
         ))}
       </div>
