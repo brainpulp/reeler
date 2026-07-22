@@ -1,41 +1,119 @@
 import React, { useState } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { api } from "./api.js";
 import TimelinePreview from "./TimelinePreview.jsx";
 
-// The combine surface: an ordered tray of segments and text cards that renders
-// into a single new clip. Lives pinned at the bottom of the app.
+const clampNum = (v, lo, hi) => {
+  const n = Number(v);
+  if (Number.isNaN(n)) return lo;
+  return Math.min(hi, Math.max(lo, n));
+};
+
+// One block on the track — a video segment (with in/out crop) or a text card.
+// Drag the ⠿ handle to reorder; reordering is resolved in App's onDragEnd.
+function SortableBlock({ item, onChange, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: `block-${item.uid}`, data: { type: "block", uid: item.uid } });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+  const dur = item.duration || item.end || 0;
+
+  return (
+    <li ref={setNodeRef} style={style} className={"tl-block " + item.kind + (item.error ? " err" : "")}>
+      <div className="tl-grip" {...attributes} {...listeners} title="drag to reorder">
+        ⠿
+      </div>
+      {item.kind === "segment" ? (
+        <div className="tl-block-body">
+          <div className="tl-block-label" title={item.label}>
+            {item.label || `clip ${item.clip_id}`}
+          </div>
+          {item.downloading ? (
+            <div className="tl-dl">⭳ downloading…</div>
+          ) : item.error ? (
+            <div className="tl-dl err">download failed</div>
+          ) : (
+            <div className="tl-crop">
+              <label>
+                in
+                <input
+                  type="number" min="0" max={dur} step="0.1" value={item.start}
+                  onChange={(e) => onChange({ start: clampNum(e.target.value, 0, item.end) })}
+                />
+              </label>
+              <label>
+                out
+                <input
+                  type="number" min="0" max={dur} step="0.1" value={item.end}
+                  onChange={(e) => onChange({ end: clampNum(e.target.value, item.start, dur) })}
+                />
+              </label>
+              <span className="tl-seg-dur">{Math.max(0, item.end - item.start).toFixed(1)}s</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="tl-block-body card-edit">
+          <input value={item.text} onChange={(e) => onChange({ text: e.target.value })} />
+          <div className="tl-crop">
+            <label>
+              sec
+              <input
+                type="number" step="0.5" min="0.5" value={item.duration}
+                onChange={(e) => onChange({ duration: e.target.value })}
+              />
+            </label>
+            <input
+              className="bg" type="text" value={item.bg} title="background color"
+              onChange={(e) => onChange({ bg: e.target.value })}
+            />
+          </div>
+        </div>
+      )}
+      <button className="tl-x" onClick={onRemove}>×</button>
+    </li>
+  );
+}
+
+// The combine surface: a horizontal track you drag reels onto, crop, reorder,
+// and render into one clip. Pinned at the bottom of the app.
 export default function Timeline({ items, setItems, onRendered }) {
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [preview, setPreview] = useState(false);
 
-  const move = (i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= items.length) return;
-    const next = items.slice();
-    [next[i], next[j]] = [next[j], next[i]];
-    setItems(next);
-  };
+  const { setNodeRef, isOver } = useDroppable({ id: "timeline-drop" });
 
-  const remove = (i) => setItems(items.filter((_, k) => k !== i));
+  const patch = (uid, p) =>
+    setItems(items.map((it) => (it.uid === uid ? { ...it, ...p } : it)));
+  const remove = (uid) => setItems(items.filter((it) => it.uid !== uid));
 
   const addCard = () =>
     setItems([
       ...items,
-      { kind: "card", text: "Title", duration: 2.5, bg: "black" },
+      { uid: Date.now(), kind: "card", text: "Title", duration: 2.5, bg: "black" },
     ]);
 
-  const editCard = (i, patch) =>
-    setItems(items.map((it, k) => (k === i ? { ...it, ...patch } : it)));
+  const pending = items.some((it) => it.downloading);
+  const renderable = items.filter((it) => !it.downloading && !it.error);
 
   const render = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const payload = items.map((it) =>
+      const payload = renderable.map((it) =>
         it.kind === "segment"
-          ? { kind: "segment", clip_id: it.clip_id, start: it.start, end: it.end }
+          ? { kind: "segment", clip_id: it.clip_id, start: Number(it.start), end: Number(it.end) }
           : { kind: "card", text: it.text, duration: Number(it.duration), bg: it.bg }
       );
       await api.renderTimeline(payload, title || null);
@@ -60,81 +138,46 @@ export default function Timeline({ items, setItems, onRendered }) {
           onChange={(e) => setTitle(e.target.value)}
         />
         <button onClick={addCard}>+ text card</button>
-        <button onClick={() => setPreview(true)} disabled={items.length === 0}>
+        <button onClick={() => setPreview(true)} disabled={renderable.length === 0}>
           ▶ preview
         </button>
         <button
           className="primary"
           onClick={render}
-          disabled={busy || items.length === 0}
+          disabled={busy || pending || renderable.length === 0}
+          title={pending ? "waiting for a download to finish" : "combine into one clip"}
         >
-          {busy ? "rendering…" : `Render (${items.length})`}
+          {busy ? "rendering…" : pending ? "downloading…" : `Render (${renderable.length})`}
         </button>
       </div>
-      {preview && (
-        <TimelinePreview items={items} onClose={() => setPreview(false)} />
-      )}
+
+      {preview && <TimelinePreview items={renderable} onClose={() => setPreview(false)} />}
       {err && <div className="error">⚠ {err}</div>}
-      {items.length === 0 ? (
-        <div className="tl-empty">
-          Add segments from a clip, or drop in a text card, then render.
-        </div>
-      ) : (
-        <ol className="tl-items">
-          {items.map((it, i) => (
-            <li key={i} className={`tl-item ${it.kind}`}>
-              <div className="tl-order">
-                <button onClick={() => move(i, -1)} disabled={i === 0}>
-                  ↑
-                </button>
-                <button
-                  onClick={() => move(i, 1)}
-                  disabled={i === items.length - 1}
-                >
-                  ↓
-                </button>
-              </div>
-              {it.kind === "segment" ? (
-                <div className="tl-body">
-                  <span className="tl-kind">▷ segment</span>
-                  <span className="tl-label">
-                    {it.label || it.clipLabel || `clip ${it.clip_id}`}
-                  </span>
-                  <span className="tl-time">
-                    {it.start.toFixed(1)}–{it.end.toFixed(1)}s
-                  </span>
-                </div>
-              ) : (
-                <div className="tl-body card-edit">
-                  <span className="tl-kind">▤ card</span>
-                  <input
-                    value={it.text}
-                    onChange={(e) => editCard(i, { text: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0.5"
-                    value={it.duration}
-                    onChange={(e) => editCard(i, { duration: e.target.value })}
-                    title="seconds"
-                  />
-                  <input
-                    type="text"
-                    className="bg"
-                    value={it.bg}
-                    onChange={(e) => editCard(i, { bg: e.target.value })}
-                    title="background color"
-                  />
-                </div>
-              )}
-              <button className="tl-x" onClick={() => remove(i)}>
-                ×
-              </button>
+
+      <SortableContext
+        items={items.map((it) => `block-${it.uid}`)}
+        strategy={horizontalListSortingStrategy}
+      >
+        <ol
+          ref={setNodeRef}
+          className={"tl-track" + (isOver ? " over" : "") + (items.length === 0 ? " empty" : "")}
+        >
+          {items.length === 0 ? (
+            <li className="tl-hint">
+              Drag reels here (⠿ handle) to crop &amp; combine — they download automatically.
             </li>
-          ))}
+          ) : (
+            items.map((it) => (
+              <SortableBlock
+                key={it.uid}
+                item={it}
+                onChange={(p) => patch(it.uid, p)}
+                onRemove={() => remove(it.uid)}
+              />
+            ))
+          )}
         </ol>
-      )}
+      </SortableContext>
     </div>
   );
 }

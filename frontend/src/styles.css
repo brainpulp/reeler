@@ -213,33 +213,55 @@ button.primary { background: var(--accent); border-color: var(--accent); }
   background: #14141b;
   border-top: 1px solid var(--line);
   padding: 10px 16px;
-  max-height: 200px;
+  max-height: 240px;
   overflow-y: auto;
   z-index: 5;
 }
 .tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tl-title { flex: 1; min-width: 160px; }
-.tl-empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
-.tl-items { list-style: none; display: flex; gap: 8px; padding: 8px 0 0; margin: 0; overflow-x: auto; }
-.tl-item {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  flex: 0 0 auto;
+
+/* Draggable grip on each library card */
+.grip {
+  position: absolute; bottom: 4px; left: 4px;
+  padding: 1px 6px; border-radius: 5px;
+  background: rgba(0,0,0,0.55); border: 1px solid var(--line);
+  color: #cfcfe0; font-size: 13px; line-height: 1.2;
+  cursor: grab; touch-action: none; opacity: 0.7;
 }
-.tl-item.card { border-style: dashed; }
-.tl-order { display: flex; flex-direction: column; }
-.tl-order button { padding: 0 5px; line-height: 1.1; font-size: 11px; }
-.tl-body { display: flex; align-items: center; gap: 6px; }
-.tl-kind { font-size: 11px; color: var(--muted); }
-.tl-label { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-time { font-size: 11px; color: var(--muted); }
-.card-edit input { width: 110px; }
-.card-edit input[type="number"] { width: 56px; }
+.grip:hover { opacity: 1; border-color: var(--accent); }
+.grip.dragging { cursor: grabbing; opacity: 1; }
+
+/* The drop track */
+.tl-track {
+  list-style: none; display: flex; gap: 8px; padding: 8px;
+  margin: 8px 0 0; overflow-x: auto; min-height: 78px;
+  border: 1px dashed var(--line); border-radius: 10px;
+  transition: border-color .12s, background .12s;
+}
+.tl-track.empty { align-items: center; }
+.tl-track.over { border-color: var(--accent); background: rgba(225,48,108,0.08); }
+.tl-hint { color: var(--muted); font-size: 13px; padding: 0 6px; }
+
+.tl-block {
+  display: flex; align-items: stretch; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px; flex: 0 0 auto;
+}
+.tl-block.card { border-style: dashed; }
+.tl-block.err { border-color: #a33; }
+.tl-grip { cursor: grab; touch-action: none; color: var(--muted); padding: 0 3px; display: flex; align-items: center; }
+.tl-grip:active { cursor: grabbing; }
+.tl-block-body { display: flex; flex-direction: column; gap: 4px; justify-content: center; }
+.tl-block-label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.tl-dl { font-size: 12px; color: var(--muted); }
+.tl-dl.err { color: #e88; }
+.tl-crop { display: flex; align-items: center; gap: 6px; }
+.tl-crop label { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; }
+.tl-crop input[type="number"] { width: 56px; }
+.tl-seg-dur { font-size: 11px; color: var(--accent); }
+.card-edit input { width: 120px; }
 .card-edit input.bg { width: 70px; }
-.tl-x { padding: 2px 7px; }
+.tl-x { padding: 2px 7px; align-self: flex-start; }
 
 /* Timeline preview modal */
 .sheet.preview { width: 460px; }

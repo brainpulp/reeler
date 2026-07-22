@@ -1,12 +1,24 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { api, fileUrl, thumbUrl } from "./api.js";
 import ClipDetail from "./ClipDetail.jsx";
 import Timeline from "./Timeline.jsx";
 import CardCaption from "./CardCaption.jsx";
+import Grip from "./Grip.jsx";
 
 // The links-only cloud organizer (GitHub Pages). "Update for cloud" opens it
 // automatically after writing the backup so syncing is one press, not two apps.
 const CLOUD_URL = "https://brainpulp.github.io/reeler/";
+
+// Stable ids for timeline blocks (so drag-reorder has keys that don't shift).
+let _uid = 1;
+const nextUid = () => _uid++;
+const arrayMove = (arr, from, to) => {
+  const a = arr.slice();
+  const [m] = a.splice(from, 1);
+  a.splice(to, 0, m);
+  return a;
+};
 
 export default function App() {
   const [clips, setClips] = useState([]);
@@ -30,7 +42,76 @@ export default function App() {
   const pollRef = useRef(null);
   const exportAfterRef = useRef(false); // download the cloud file once a sync finishes
 
-  const addToTimeline = (item) => setTimeline((t) => [...t, item]);
+  const addToTimeline = (item) =>
+    setTimeline((t) => [...t, { uid: nextUid(), ...item }]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+
+  // Drag a reel's grip onto the timeline: add it as a segment and, if it's an
+  // indexed (not-downloaded) reel, fetch the video automatically in place.
+  const dropClipToTimeline = async (c) => {
+    const uid = nextUid();
+    const label = c.title || (c.ig_owner ? `@${c.ig_owner}` : c.filename);
+    setTimeline((t) => [
+      ...t,
+      {
+        uid,
+        kind: "segment",
+        clip_id: c.id,
+        start: 0,
+        end: c.duration || 0,
+        duration: c.duration || 0,
+        label,
+        downloading: !c.has_video,
+        error: false,
+      },
+    ]);
+    if (!c.has_video) {
+      try {
+        const updated = await api.ensure(c.id);
+        setTimeline((t) =>
+          t.map((it) =>
+            it.uid === uid
+              ? {
+                  ...it,
+                  end: updated.duration || it.end,
+                  duration: updated.duration || it.duration,
+                  downloading: false,
+                }
+              : it
+          )
+        );
+        refresh();
+      } catch (e) {
+        setTimeline((t) =>
+          t.map((it) =>
+            it.uid === uid ? { ...it, downloading: false, error: true } : it
+          )
+        );
+      }
+    }
+  };
+
+  const onDragEnd = ({ active, over }) => {
+    if (!over) return;
+    const a = active.data?.current;
+    const overId = String(over.id);
+    // A library reel dropped onto the timeline (its zone, or over an existing block).
+    if (a?.type === "clip" && (overId === "timeline-drop" || overId.startsWith("block-"))) {
+      dropClipToTimeline(a.clip);
+      return;
+    }
+    // Reordering blocks within the timeline.
+    if (a?.type === "block" && overId.startsWith("block-") && overId !== `block-${a.uid}`) {
+      setTimeline((items) => {
+        const from = items.findIndex((it) => it.uid === a.uid);
+        const to = items.findIndex((it) => `block-${it.uid}` === overId);
+        return from < 0 || to < 0 ? items : arrayMove(items, from, to);
+      });
+    }
+  };
 
   const refresh = useCallback(async () => {
     const data = await api.listClips(activeTag, activeCollection);
@@ -253,6 +334,7 @@ export default function App() {
   };
 
   return (
+    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
     <div className="app">
       <header>
         <h1>🎬 Reeler</h1>
@@ -432,6 +514,7 @@ export default function App() {
                   </span>
                 )}
                 {c.kept ? <span className="badge-kept" title="saved">★</span> : null}
+                <Grip clip={c} />
               </div>
               <CardCaption clip={c} onChanged={refresh} />
               <div className="meta">
@@ -476,5 +559,6 @@ export default function App() {
 
       <Timeline items={timeline} setItems={setTimeline} onRendered={refresh} />
     </div>
+    </DndContext>
   );
 }

@@ -45,7 +45,9 @@ echo Starting backend on http://localhost:8000 ...
 start "Reeler API" cmd /k ".venv\Scripts\python -m uvicorn --app-dir backend app.main:app --reload --port 8000"
 
 echo Starting frontend on http://localhost:5173 ...
-start "Reeler UI" cmd /k "cd /d %~dp0frontend && npm run dev"
+REM npm install runs every launch so a pull that adds a dependency (it's a
+REM no-op when nothing changed) is picked up without manual steps.
+start "Reeler UI" cmd /k "cd /d %~dp0frontend && npm install && npm run dev"
 
 REM Give Vite a moment to boot, then open the app (proxy port, not :8000).
 timeout /t 6 >nul
