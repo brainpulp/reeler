@@ -116,10 +116,11 @@ def health() -> dict:
         thumbs_ready = None
     return {
         "ok": True,
-        "build": "thumbs",  # bump to verify the running code is current
+        "build": "ai-summaries",  # bump to verify the running code is current
         "thumbs_ready": thumbs_ready,
         "ffmpeg": bool(media),
         "ig_cookie_configured": bool(config.IG_COOKIE_FILE),
+        "ai_configured": bool(config.AI_KEY),
     }
 
 
@@ -180,6 +181,34 @@ def index_progress() -> dict:
 def index_stop() -> dict:
     jobs.index_job.stop()
     return jobs.index_job.status()
+
+
+@app.post("/api/summarize/start")
+def summarize_start() -> dict:
+    """AI-summarize reels lacking a summary. No Instagram calls (uses captions)."""
+    if not jobs.ai.available():
+        raise HTTPException(
+            400, "No AI key configured. Set REELER_AI_KEY (or ANTHROPIC_API_KEY)."
+        )
+    started = jobs.summarize_job.start(jobs.summarize_worker)
+    if not started:
+        raise HTTPException(409, "a summarize run is already going")
+    return jobs.summarize_job.status()
+
+
+@app.get("/api/summarize/progress")
+def summarize_progress() -> dict:
+    st = jobs.summarize_job.status()
+    with db.get_conn() as conn:
+        st.update(repo.summary_stats(conn))
+    st["ai_available"] = jobs.ai.available()
+    return st
+
+
+@app.post("/api/summarize/stop")
+def summarize_stop() -> dict:
+    jobs.summarize_job.stop()
+    return jobs.summarize_job.status()
 
 
 def _ensure_video(conn, loader, row) -> Path:

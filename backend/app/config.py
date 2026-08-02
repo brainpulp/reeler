@@ -23,6 +23,12 @@ DB_PATH = DATA_DIR / "reeler.db"
 IG_COOKIE_FILE = os.environ.get("REELER_IG_COOKIE_FILE", "")
 IG_USERNAME = os.environ.get("REELER_IG_USERNAME", "")
 
+# AI summaries (optional). The key can come from REELER_AI_KEY or the standard
+# ANTHROPIC_API_KEY; the feature is simply inert without one. Summaries are built
+# from captions/metadata we already store — no Instagram calls are ever made.
+AI_KEY = os.environ.get("REELER_AI_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+AI_MODEL = os.environ.get("REELER_AI_MODEL", "claude-haiku-4-5-20251001")
+
 
 def ensure_dirs() -> None:
     for d in (DATA_DIR, LIBRARY_DIR, DERIVED_DIR, THUMBS_DIR):

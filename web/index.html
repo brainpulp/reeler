@@ -31,6 +31,7 @@
   .tags{display:flex;flex-wrap:wrap;gap:4px}
   .tag{font-size:11px;background:#22222c;border:1px solid var(--line);border-radius:999px;padding:2px 8px;display:inline-flex;gap:4px;align-items:center}
   .tag b{color:var(--accent);font-weight:600}
+  .summary{font-size:12px;line-height:1.35;color:#d7e6ff;background:rgba(120,170,255,.10);border-left:2px solid #6f9fff;border-radius:4px;padding:4px 7px}
   .tag button{padding:0 3px;border:none;background:none;color:var(--muted)}
   .mini{padding:4px 7px;font-size:12px}
   .empty{color:var(--muted);text-align:center;padding:80px 20px}
@@ -238,6 +239,12 @@ function card(r){
   collRow.append(del);
   meta.append(collRow);
 
+  // AI summary (if present)
+  if(r.summary){
+    const sum=document.createElement("div"); sum.className="summary"; sum.textContent="✨ "+r.summary;
+    meta.append(sum);
+  }
+
   // tags
   const tags=document.createElement("div"); tags.className="tags";
   r.tags.forEach(t=>{ const s=document.createElement("span"); s.className="tag"; s.innerHTML=`<b>#</b>${t}`; const x=document.createElement("button"); x.textContent="×"; x.onclick=()=>{ r.tags=r.tags.filter(y=>y!==t); save(); render(); }; s.append(x); tags.append(s); });
@@ -294,10 +301,11 @@ document.getElementById("importFile").onchange=async e=>{
   let added=0, updated=0;
   for(const [code,inc] of Object.entries(data.reels)){
     if(!state.reels[code]){
-      state.reels[code]={code, tags:inc.tags||[], collection:inc.collection||null, note:inc.note||""}; added++;
+      state.reels[code]={code, tags:inc.tags||[], collection:inc.collection||null, note:inc.note||"", summary:inc.summary||""}; added++;
     } else {
       const cur=state.reels[code];
       if(inc.collection) cur.collection=inc.collection;          // Instagram is source of truth for collection
+      if(inc.summary) cur.summary=inc.summary;                   // carry AI summary
       cur.tags=[...new Set([...(cur.tags||[]), ...(inc.tags||[])])]; // union tags, keep yours
       updated++;
     }
@@ -318,10 +326,11 @@ async function autoSync(){
     if(!data || !data.reels) return;
     for(const [code,inc] of Object.entries(data.reels)){
       if(!state.reels[code]){
-        state.reels[code]={code, tags:inc.tags||[], collection:inc.collection||null, note:inc.note||""};
+        state.reels[code]={code, tags:inc.tags||[], collection:inc.collection||null, note:inc.note||"", summary:inc.summary||""};
       } else {
         const cur=state.reels[code];
         if(inc.collection) cur.collection=inc.collection;
+        if(inc.summary) cur.summary=inc.summary;
         cur.tags=[...new Set([...(cur.tags||[]), ...(inc.tags||[])])];
       }
     }

@@ -13,7 +13,7 @@ import random
 import threading
 import time
 
-from . import config, db, instagram, repo
+from . import ai, config, db, instagram, repo
 
 # --- Instagram safety limits (see CLAUDE.md "Instagram safety & scheduling") ---
 # A single sniff run never downloads more than this many *new* reels, so one
@@ -271,8 +271,64 @@ def feed_collections_worker(job: Job, cookie_file, username, max_reels=4000) -> 
         conn.commit()
 
 
-# Jobs: full download sniff, local scan, collection backfill, metadata index.
+MAX_SUMMARIES_PER_RUN = 400  # AI calls are cheap, but cap the per-run cost/burst
+# Gentle pacing between AI calls. This never touches Instagram (summaries come
+# from captions already stored), so it's only easing the AI provider's limits.
+SUMMARY_PACE_MIN, SUMMARY_PACE_MAX = 0.4, 1.0
+
+
+def summarize_worker(job: Job, max_new: int = MAX_SUMMARIES_PER_RUN) -> None:
+    """AI-summarize reels that don't have a summary yet — no Instagram calls.
+
+    Reads captions/metadata already in the DB and writes a one-line summary per
+    reel. Paced, capped, and cancellable; a run picks up any un-summarized reel,
+    so new reels get summarized simply by running this again after an update.
+    Aborts on repeated AI errors (treated as a rate-limit/back-off signal).
+    """
+    if not ai.available():
+        job.state["error"] = (
+            "No AI key configured. Set REELER_AI_KEY (or ANTHROPIC_API_KEY) on "
+            "this PC to enable summaries."
+        )
+        return
+    errors = 0
+    with db.get_conn() as conn:
+        rows = repo.clips_needing_summary(conn, limit=max_new)
+        job.state["seen"] = len(rows)
+        for row in rows:
+            if job.cancelled():
+                job.state["stopped"] = True
+                break
+            tags = [t["name"] for t in conn.execute(
+                "SELECT t.name FROM tags t JOIN clip_tags ct ON ct.tag_id=t.id "
+                "WHERE ct.clip_id=? ORDER BY t.name", (row["id"],)).fetchall()]
+            try:
+                summary = ai.summarize(
+                    row["caption"] or "", row["ig_owner"] or "",
+                    row["collection"] or "", tags,
+                )
+                errors = 0
+            except ai.AIUnavailable as exc:
+                job.state["error"] = str(exc)
+                break
+            except Exception as exc:  # API/rate-limit error: back off, then abort
+                errors += 1
+                job.state["error"] = str(exc)
+                if errors >= 3:
+                    break
+                time.sleep(5.0)
+                continue
+            # Store even an empty result so we don't re-try dead-end reels forever.
+            repo.set_summary(conn, row["id"], summary or "—")
+            conn.commit()
+            job.state["added"] += 1
+            time.sleep(random.uniform(SUMMARY_PACE_MIN, SUMMARY_PACE_MAX))
+
+
+# Jobs: full download sniff, local scan, collection backfill, metadata index,
+# AI summaries.
 sniff_job = Job()
 scan_job = Job()
 collections_job = Job()
 index_job = Job()
+summarize_job = Job()

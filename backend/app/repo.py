@@ -178,7 +178,7 @@ def cloud_backup(conn: sqlite3.Connection) -> dict:
     with its collection + tags (shortcodes only — no files)."""
     reels: dict[str, dict] = {}
     for r in conn.execute(
-        "SELECT id, ig_shortcode, collection FROM clips "
+        "SELECT id, ig_shortcode, collection, summary FROM clips "
         "WHERE ig_shortcode IS NOT NULL AND source='instagram'"
     ).fetchall():
         tags = [t["name"] for t in conn.execute(
@@ -186,9 +186,49 @@ def cloud_backup(conn: sqlite3.Connection) -> dict:
             "WHERE ct.clip_id=? ORDER BY t.name", (r["id"],)).fetchall()]
         reels[r["ig_shortcode"]] = {
             "code": r["ig_shortcode"], "tags": tags,
-            "collection": r["collection"], "note": "",
+            "collection": r["collection"],
+            "summary": "" if (r["summary"] or "") == "—" else (r["summary"] or ""),
+            "note": "",
         }
     return {"reels": reels}
+
+
+def set_summary(conn: sqlite3.Connection, clip_id: int, summary: str) -> None:
+    conn.execute("UPDATE clips SET summary = ? WHERE id = ?", (summary, clip_id))
+
+
+def clips_needing_summary(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    """Reels with no summary yet but something to summarize from (a caption or a
+    collection). Newest first, so fresh reels get done before older backlog."""
+    return conn.execute(
+        """
+        SELECT id, caption, ig_owner, collection FROM clips
+         WHERE source = 'instagram'
+           AND (summary IS NULL OR summary = '')
+           AND ( (caption IS NOT NULL AND caption <> '')
+                 OR (collection IS NOT NULL AND collection <> '') )
+      ORDER BY created_at DESC
+         LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def summary_stats(conn: sqlite3.Connection) -> dict:
+    """How many reels are summarized vs. still summarizable — for progress/UI."""
+    done = conn.execute(
+        "SELECT COUNT(*) AS n FROM clips WHERE summary IS NOT NULL AND summary <> ''"
+    ).fetchone()["n"]
+    todo = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM clips
+         WHERE source = 'instagram'
+           AND (summary IS NULL OR summary = '')
+           AND ( (caption IS NOT NULL AND caption <> '')
+                 OR (collection IS NOT NULL AND collection <> '') )
+        """
+    ).fetchone()["n"]
+    return {"summarized": done, "remaining": todo}
 
 
 def set_thumb_url(conn: sqlite3.Connection, shortcode: str, url: str) -> None:
@@ -292,6 +332,9 @@ def _clip_to_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     d["tags"] = [t["name"] for t in tags]
     d["op"] = json.loads(row["op"]) if row["op"] else None
     d["segments"] = list_segments(conn, row["id"])
+    # "—" is the sentinel for "AI had nothing to summarize" — hide it from the UI.
+    if "summary" in d and (d["summary"] or "") == "—":
+        d["summary"] = ""
     return d
 
 

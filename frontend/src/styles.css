@@ -136,6 +136,16 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   overflow: hidden;
 }
 .card-caption.empty { color: var(--muted); font-style: italic; }
+.card-summary {
+  margin: 4px 8px 0;
+  padding: 4px 7px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #d7e6ff;
+  background: rgba(120, 170, 255, 0.10);
+  border-left: 2px solid #6f9fff;
+  border-radius: 4px;
+}
 .card-caption-sub { display: block; color: var(--muted); font-size: 11px; }
 .card-caption-edit {
   width: calc(100% - 16px);

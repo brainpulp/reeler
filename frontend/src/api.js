@@ -38,6 +38,9 @@ export const api = {
     req(`/clips/${id}/keep?keep=${keep}`, { method: "POST", body: "{}" }),
   cleanLibrary: () => req("/library/clean", { method: "POST", body: "{}" }),
   publish: () => req("/publish", { method: "POST", body: "{}" }),
+  startSummarize: () => req("/summarize/start", { method: "POST", body: "{}" }),
+  stopSummarize: () => req("/summarize/stop", { method: "POST", body: "{}" }),
+  summarizeProgress: () => req("/summarize/progress"),
   upload: async (file) => {
     const fd = new FormData();
     fd.append("file", file);

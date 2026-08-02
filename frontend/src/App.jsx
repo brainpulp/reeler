@@ -39,6 +39,7 @@ export default function App() {
   const [scan, setScan] = useState(null); // background library-scan progress
   const [backfill, setBackfill] = useState(null); // collection backfill progress
   const [index, setIndex] = useState(null); // metadata-index progress
+  const [summarize, setSummarize] = useState(null); // AI summary job progress
   const pollRef = useRef(null);
   const exportAfterRef = useRef(false); // download the cloud file once a sync finishes
 
@@ -151,18 +152,20 @@ export default function App() {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
-        const [sp, scp, bf, ix] = await Promise.all([
+        const [sp, scp, bf, ix, sum] = await Promise.all([
           api.sniffProgress(),
           api.scanProgress(),
           api.collectionsProgress(),
           api.indexProgress(),
+          api.summarizeProgress(),
         ]);
         setSniff(sp);
         setScan(scp);
         setBackfill(bf);
         setIndex(ix);
+        setSummarize(sum);
         await refresh();
-        if (!sp.running && !scp.running && !bf.running && !ix.running) {
+        if (!sp.running && !scp.running && !bf.running && !ix.running && !sum.running) {
           clearInterval(pollRef.current);
           pollRef.current = null;
           if (sp.done) {
@@ -211,6 +214,14 @@ export default function App() {
                 .catch((e) =>
                   setInfo(`Updated ${bf.added} reels · publish error: ${e.message}`)
                 );
+              // Summarize any newly-catalogued reels too (no-op without a key).
+              api
+                .startSummarize()
+                .then((p) => {
+                  setSummarize(p);
+                  startPolling();
+                })
+                .catch(() => {});
             } else {
               setInfo(
                 bf.error
@@ -224,6 +235,12 @@ export default function App() {
               ix.error
                 ? `Index stopped: ${ix.error}`
                 : `${ix.capped ? "Indexed a batch" : "Index done"} — ${ix.added} reels catalogued${ix.capped ? " (run again for more)" : ""}`
+            );
+          } else if (sum.done) {
+            setInfo(
+              sum.error
+                ? `Summaries stopped: ${sum.error}`
+                : `Summarized ${sum.added} reels · ${sum.remaining || 0} left`
             );
           }
         }
@@ -295,17 +312,39 @@ export default function App() {
       api.scanProgress(),
       api.collectionsProgress(),
       api.indexProgress(),
+      api.summarizeProgress(),
     ])
-      .then(([sp, scp, bf, ix]) => {
+      .then(([sp, scp, bf, ix, sum]) => {
         setSniff(sp);
         setScan(scp);
         setBackfill(bf);
         setIndex(ix);
-        if (sp.running || scp.running || bf.running || ix.running) startPolling();
+        setSummarize(sum);
+        if (sp.running || scp.running || bf.running || ix.running || sum.running)
+          startPolling();
       })
       .catch(() => {});
     return () => pollRef.current && clearInterval(pollRef.current);
   }, [startPolling]);
+
+  const onSummarize = async () => {
+    setError(null);
+    try {
+      const p = await api.startSummarize();
+      setSummarize(p);
+      startPolling();
+    } catch (e) {
+      setError(e.message); // e.g. "No AI key configured…"
+    }
+  };
+
+  const onStopSummarize = async () => {
+    try {
+      setSummarize(await api.stopSummarize());
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   const onUpload = (e) => {
     const file = e.target.files?.[0];
@@ -390,6 +429,27 @@ export default function App() {
                 title="Light update from Instagram (recent additions only), then download the file for the cloud app"
               >
                 ⟳ Update for cloud
+              </button>
+            )}
+            {summarize && summarize.running ? (
+              <>
+                <button className="stop" onClick={onStopSummarize}>
+                  ■ Stop AI
+                </button>
+                <span className="sniff-progress">
+                  summarizing… {summarize.added}
+                  {summarize.remaining ? ` · ${summarize.remaining} left` : ""}
+                </span>
+              </>
+            ) : (
+              <button
+                onClick={onSummarize}
+                title="AI-summarize reels from their captions (no Instagram calls). New reels get summarized on each run."
+              >
+                ✨ AI summaries
+                {summarize && summarize.remaining
+                  ? ` (${summarize.remaining})`
+                  : ""}
               </button>
             )}
             <button onClick={onClean} disabled={busy} title="Delete temporary working videos (keeps saved + exports)">
@@ -517,6 +577,11 @@ export default function App() {
                 <Grip clip={c} />
               </div>
               <CardCaption clip={c} onChanged={refresh} />
+              {c.summary ? (
+                <div className="card-summary" title="AI summary">
+                  ✨ {c.summary}
+                </div>
+              ) : null}
               <div className="meta">
                 <span className="owner">
                   {c.source === "derived"
