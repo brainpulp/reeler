@@ -1,0 +1,369 @@
+import React, { useRef, useState } from "react";
+import { api, fileUrl } from "./api.js";
+
+// Detail / editor panel for one clip:
+//  - annotate: title + description (metadata) and free-text tags
+//  - time-crop: mark labeled segments (the reusable units for combining)
+//  - quick edits: trim and speed, each spawning a new derived clip
+export default function ClipDetail({ clip, onClose, onChanged, onAddToTimeline }) {
+  const videoRef = useRef(null);
+
+  const [hasVideo, setHasVideo] = useState(!!clip.has_video);
+  const [kept, setKept] = useState(!!clip.kept);
+  const [downloading, setDownloading] = useState(false);
+  const [title, setTitle] = useState(clip.title || "");
+  const [description, setDescription] = useState(clip.description || "");
+  const [tags, setTags] = useState(clip.tags);
+  const [segments, setSegments] = useState(clip.segments || []);
+  const [newTag, setNewTag] = useState("");
+
+  const [segStart, setSegStart] = useState(0);
+  const [segEnd, setSegEnd] = useState(clip.duration || 0);
+  const [segLabel, setSegLabel] = useState("");
+
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(clip.duration || 0);
+  const [factor, setFactor] = useState(1.5);
+
+  const [capText, setCapText] = useState("");
+  const [capPos, setCapPos] = useState("bottom");
+  const [capTimed, setCapTimed] = useState(false);
+  const [capStart, setCapStart] = useState(0);
+  const [capEnd, setCapEnd] = useState(clip.duration || 0);
+
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+
+  const playhead = () =>
+    videoRef.current ? Number(videoRef.current.currentTime.toFixed(2)) : 0;
+
+  const guard = (fn) => async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await fn();
+    } catch (e) {
+      setNote(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = async () => {
+    setDownloading(true);
+    setNote(null);
+    try {
+      await api.ensure(clip.id);
+      setHasVideo(true);
+      await onChanged();
+    } catch (e) {
+      setNote(e.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const toggleKeep = guard(async () => {
+    const next = !kept;
+    await api.keep(clip.id, next);
+    setKept(next);
+    await onChanged();
+  });
+
+  const saveMeta = guard(async () => {
+    await api.updateMeta(clip.id, { title, description });
+    setNote("Saved");
+    await onChanged();
+  });
+
+  const addTag = guard(async () => {
+    if (!newTag.trim()) return;
+    const updated = await api.addTag(clip.id, newTag.trim());
+    setTags(updated.tags);
+    setNewTag("");
+    await onChanged();
+  });
+
+  const removeTag = (t) =>
+    guard(async () => {
+      const updated = await api.removeTag(clip.id, t);
+      setTags(updated.tags);
+      await onChanged();
+    })();
+
+  const addSegment = guard(async () => {
+    const updated = await api.addSegment(clip.id, {
+      start: Number(segStart),
+      end: Number(segEnd),
+      label: segLabel.trim() || null,
+    });
+    setSegments(updated.segments);
+    setSegLabel("");
+    await onChanged();
+  });
+
+  const removeSegment = (segId) =>
+    guard(async () => {
+      await api.deleteSegment(segId);
+      setSegments(segments.filter((s) => s.id !== segId));
+      await onChanged();
+    })();
+
+  const sendSegment = (s) =>
+    onAddToTimeline({
+      kind: "segment",
+      clip_id: clip.id,
+      start: s.start,
+      end: s.end,
+      label: s.label || title || clip.filename,
+    });
+
+  const doTrim = guard(async () => {
+    await api.trim(clip.id, Number(trimStart), Number(trimEnd));
+    setNote("Trimmed → new clip created");
+    await onChanged();
+  });
+
+  const doSpeed = guard(async () => {
+    await api.speed(clip.id, Number(factor));
+    setNote(`Speed ×${factor} → new clip created`);
+    await onChanged();
+  });
+
+  const doCaption = guard(async () => {
+    if (!capText.trim()) return;
+    await api.caption(clip.id, {
+      text: capText,
+      position: capPos,
+      start: capTimed ? Number(capStart) : null,
+      end: capTimed ? Number(capEnd) : null,
+    });
+    setNote("Caption burned in → new clip created");
+    await onChanged();
+  });
+
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <button className="close" onClick={onClose}>
+          ×
+        </button>
+        {hasVideo ? (
+          <video ref={videoRef} src={fileUrl(clip.id)} controls autoPlay />
+        ) : (
+          <div className="not-downloaded">
+            <div className="nd-icon">⤓</div>
+            <p>This reel is indexed but not downloaded yet.</p>
+            <button className="primary" onClick={download} disabled={downloading}>
+              {downloading ? "Downloading…" : "Download to play & edit"}
+            </button>
+          </div>
+        )}
+        <div className="dims">
+          {clip.width ? `${clip.width}×${clip.height} · ` : ""}
+          {clip.duration ? `${clip.duration.toFixed(1)}s · ` : ""}
+          {clip.source}
+          {" · "}
+          <button className="keep-toggle" onClick={toggleKeep} disabled={busy}>
+            {kept ? "★ saved" : "☆ keep"}
+          </button>
+        </div>
+
+        <section>
+          <h3>Annotate</h3>
+          <input
+            className="full"
+            placeholder="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            className="full"
+            placeholder="description / notes"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <button onClick={saveMeta} disabled={busy}>
+            save
+          </button>
+        </section>
+
+        <section>
+          <h3>Tags</h3>
+          <div className="tags">
+            {tags.map((t) => (
+              <span key={t} className="tag">
+                #{t}
+                <button onClick={() => removeTag(t)}>×</button>
+              </span>
+            ))}
+          </div>
+          <div className="row">
+            <input
+              value={newTag}
+              placeholder="add tag…"
+              onChange={(e) => setNewTag(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addTag()}
+            />
+            <button onClick={addTag} disabled={busy}>
+              add
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Segments (time-crop)</h3>
+          {segments.length > 0 && (
+            <ul className="seglist">
+              {segments.map((s) => (
+                <li key={s.id}>
+                  <span className="seglabel">{s.label || "segment"}</span>
+                  <span className="segtime">
+                    {s.start.toFixed(1)}–{s.end.toFixed(1)}s
+                  </span>
+                  <button onClick={() => sendSegment(s)} title="add to timeline">
+                    → timeline
+                  </button>
+                  <button onClick={() => removeSegment(s.id)}>×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="row">
+            <label>
+              start
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={segStart}
+                onChange={(e) => setSegStart(e.target.value)}
+              />
+            </label>
+            <button onClick={() => setSegStart(playhead())} title="use playhead">
+              ⌖
+            </button>
+            <label>
+              end
+              <input
+                type="number"
+                step="0.1"
+                value={segEnd}
+                onChange={(e) => setSegEnd(e.target.value)}
+              />
+            </label>
+            <button onClick={() => setSegEnd(playhead())} title="use playhead">
+              ⌖
+            </button>
+          </div>
+          <div className="row">
+            <input
+              placeholder="label (optional)"
+              value={segLabel}
+              onChange={(e) => setSegLabel(e.target.value)}
+            />
+            <button onClick={addSegment} disabled={busy}>
+              mark segment
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Trim → new clip</h3>
+          <div className="row">
+            <label>
+              start
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={trimStart}
+                onChange={(e) => setTrimStart(e.target.value)}
+              />
+            </label>
+            <label>
+              end
+              <input
+                type="number"
+                step="0.1"
+                value={trimEnd}
+                onChange={(e) => setTrimEnd(e.target.value)}
+              />
+            </label>
+            <button onClick={doTrim} disabled={busy}>
+              trim
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Caption (burn-in) → new clip</h3>
+          <input
+            className="full"
+            placeholder="caption text"
+            value={capText}
+            onChange={(e) => setCapText(e.target.value)}
+          />
+          <div className="row">
+            <select value={capPos} onChange={(e) => setCapPos(e.target.value)}>
+              <option value="bottom">bottom</option>
+              <option value="center">center</option>
+              <option value="top">top</option>
+            </select>
+            <label className="inline">
+              <input
+                type="checkbox"
+                checked={capTimed}
+                onChange={(e) => setCapTimed(e.target.checked)}
+              />
+              timed
+            </label>
+            {capTimed && (
+              <>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={capStart}
+                  onChange={(e) => setCapStart(e.target.value)}
+                  title="show from (s)"
+                />
+                <input
+                  type="number"
+                  step="0.1"
+                  value={capEnd}
+                  onChange={(e) => setCapEnd(e.target.value)}
+                  title="show until (s)"
+                />
+              </>
+            )}
+            <button onClick={doCaption} disabled={busy}>
+              burn in
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Speed → new clip</h3>
+          <div className="row">
+            <input
+              type="range"
+              min="0.25"
+              max="4"
+              step="0.25"
+              value={factor}
+              onChange={(e) => setFactor(e.target.value)}
+            />
+            <span>×{factor}</span>
+            <button onClick={doSpeed} disabled={busy}>
+              apply
+            </button>
+          </div>
+        </section>
+
+        {note && <div className="note">{note}</div>}
+      </div>
+    </div>
+  );
+}
